@@ -1,127 +1,240 @@
-import numpy as np
+"""
+Training script for an RL agent on the CustomCityEnv.
+
+This script demonstrates a two-phase training process:
+1. Initial training focused on two Key Performance Indicators (KPIs): comfort and emissions.
+2. Continued training incorporating additional KPIs (e.g., grid impact),
+   starting from the policy learned in the first phase.
+
+It uses stable-baselines3 for the PPO agent and CustomCityEnv for the environment.
+Evaluation results and trained models are saved for each phase.
+TensorBoard logging is enabled for monitoring training progress.
+"""
+import os
 import pandas as pd
-from AICrowdControl import ControlTrackReward, PhaseWeights, BASELINE_KPIS, PHASE_I, PHASE_II
+import numpy as np # Still needed for CustomCityEnv's dummy data generation, and potentially by SB3 or eval.
+from stable_baselines3 import PPO
+from stable_baselines3.common.env_checker import check_env
 
-def generate_dummy_environment_data(num_timesteps, num_buildings):
-    """
-    Generates a dictionary of dummy data for all KPIs for one episode.
-    """
-    # Electricity consumption for each building, each timestep
-    # Shape: (timesteps, num_buildings)
-    e_episode_array = np.random.rand(num_timesteps, num_buildings) * 50 # kW for example
+# Assuming AICrowdControl.py and CustomCityEnv.py are in the same directory or PYTHONPATH
+from AICrowdControl import PhaseWeights, BASELINE_KPIS # BASELINE_KPIS is used by CustomCityEnv
+from CustomCityEnv import CustomCityEnv
 
-    # Emission rate per timestep
-    # Shape: (timesteps,)
-    emission_rate_episode = np.random.rand(num_timesteps) * 0.5 + 0.1 # kgCO2/kWh
+# --- Constants for training phases (can be overridden if needed) ---
+TOTAL_TIMESTEPS_2KPI = 30000
+TOTAL_TIMESTEPS_MULTI = 40000
+MODEL_SAVE_PATH_2KPI_BASE = "ppo_2kpi_model"
+MODEL_SAVE_PATH_MULTI_BASE = "ppo_multi_kpi_model"
+TENSORBOARD_LOG_PATH_2KPI_BASE = "./ppo_tensorboard_logs_2kpi/"
+TENSORBOARD_LOG_PATH_MULTI_BASE = "./ppo_tensorboard_logs_multi_kpi/"
+EVAL_RESULTS_CSV_2KPI = 'evaluation_results_2kpi.csv'
+EVAL_RESULTS_CSV_MULTI = 'evaluation_results_multi_kpi.csv'
 
-    # Temperature, setpoint, occupancy for each building (zone), each timestep
-    # Shape: (timesteps, num_buildings) assuming 1 zone per building for simplicity
-    temp_episode_array = np.random.rand(num_timesteps, num_buildings) * 10 + 15 # deg C
-    setpoint_episode_array = np.full_like(temp_episode_array, 22.5) # deg C
-    occupancy_episode_array = np.random.randint(0, 2, size=temp_episode_array.shape)
+def main_2kpi_training(num_buildings, timesteps_per_episode):
+    """Trains a PPO agent focusing on 2 KPIs (comfort and emissions)."""
+    print("\n--- Starting 2-KPI Training Phase ---")
 
-    # District consumption: sum of consumption of all buildings per timestep
-    # Shape: (timesteps,)
-    district_consumption_episode = np.sum(e_episode_array, axis=1)
-
-    # Outage: boolean array per timestep (applies to whole district for resilience KPIs)
-    # Shape: (timesteps,)
-    outage_timesteps_episode = np.random.choice([True, False], size=num_timesteps, p=[0.1, 0.9]) # 10% chance of outage
-
-    # Demand and Served energy for each building, each timestep
-    # Shape: (timesteps, num_buildings)
-    # Demand can be slightly higher than consumption, served can be less than demand
-    demand_episode_array = e_episode_array * np.random.uniform(1.0, 1.2, size=e_episode_array.shape)
-    # During outage, served might be much lower or zero. For simplicity, this doesn't explicitly model that yet.
-    # The KPI function for unserved_energy itself will check the outage array.
-    served_episode_array = demand_episode_array * np.random.uniform(0.7, 1.0, size=demand_episode_array.shape)
-    # Ensure served does not exceed demand due to multiplication
-    served_episode_array = np.minimum(demand_episode_array, served_episode_array)
-
-
-    current_environment_data = {
-        'e': e_episode_array,
-        'emission_rate': emission_rate_episode,
-        'temp': temp_episode_array,
-        'setpoint': setpoint_episode_array,
-        'band': 1.0,  # deg C
-        'occupancy': occupancy_episode_array,
-        'district_consumption': district_consumption_episode,
-        'hours_per_day': 24, # Assuming hourly timesteps
-        'outage_timesteps': outage_timesteps_episode, # Used by thermal_resilience & unserved_energy
-        'demand': demand_episode_array,
-        'served': served_episode_array
-    }
-    return current_environment_data
-
-def main():
-    print("Starting training simulation...")
-    print("Running test with Comfort and Emissions KPIs Combined (w1=0.5, w2=0.5).")
-
-    # Define comfort and emissions combined weights
+    # --- Configuration ---
     comfort_emissions_weights = PhaseWeights(w1=0.5, w2=0.5, w3=0.0, w4=0.0)
 
-    # Instantiate ControlTrackReward and set to comfort_emissions_weights phase
-    reward_calculator = ControlTrackReward(baseline=BASELINE_KPIS, phase=comfort_emissions_weights)
+    # Ensure TensorBoard log directory exists
+    os.makedirs(TENSORBOARD_LOG_PATH_2KPI_BASE, exist_ok=True)
 
-    num_episodes = 10 # Small number for testing
-    num_timesteps_per_episode = 24 * 7 # One week of hourly data
-    num_buildings = 2 # Example number of buildings
+    # --- Environment Setup ---
+    print(f"Setting up CustomCityEnv for 2-KPI training (Buildings: {num_buildings}, Timesteps/Episode: {timesteps_per_episode})...")
+    env_2kpi = CustomCityEnv(
+        phase_weights=comfort_emissions_weights,
+        num_buildings=num_buildings,
+        timesteps_per_episode=timesteps_per_episode
+    )
 
-    episode_logs = []
+    # --- Agent Training (2-KPIs) ---
+    print(f"Instantiating PPO agent for 2-KPI training (TensorBoard logs: {TENSORBOARD_LOG_PATH_2KPI_BASE})...")
+    model_2kpi = PPO(
+        "MlpPolicy",
+        env_2kpi,
+        verbose=1,
+        tensorboard_log=TENSORBOARD_LOG_PATH_2KPI_BASE
+    )
 
-    # --- Training Loop (Placeholder) ---
-    for episode in range(num_episodes):
-        print(f"\n--- Episode {episode + 1}/{num_episodes} ---")
+    print(f"Starting 2-KPI training for {TOTAL_TIMESTEPS_2KPI} timesteps...")
+    # Note: TOTAL_TIMESTEPS is set for demonstration. For robust convergence and
+    # potentially higher scores, significantly more timesteps would likely be required.
+    model_2kpi.learn(
+        total_timesteps=TOTAL_TIMESTEPS_2KPI,
+        progress_bar=True
+    )
 
-        # In a real scenario, data would be collected from an environment interaction loop
-        # For now, we generate dummy data for the whole episode at once.
-        current_environment_data = generate_dummy_environment_data(num_timesteps_per_episode, num_buildings)
+    model_save_path = MODEL_SAVE_PATH_2KPI_BASE + ".zip"
+    print(f"2-KPI Training finished. Saving model to {model_save_path} ...")
+    model_2kpi.save(MODEL_SAVE_PATH_2KPI_BASE)
 
-        # Call get_all_kpi_values
-        try:
-            raw_kpis = reward_calculator.get_all_kpi_values(current_environment_data)
-            print(f"Episode {episode + 1} Raw KPIs:")
-            for k, v in raw_kpis.items():
-                print(f"  {k}: {v:.4f}")
+    env_2kpi.close()
+    print("2-KPI Training environment closed.")
 
-            log_entry = {'episode': episode + 1}
-            log_entry.update(raw_kpis)
-            episode_logs.append(log_entry)
+    # --- Evaluation/Logging for 2-KPI Model ---
+    print("\n--- Evaluating 2-KPI Trained Model ---")
+    loaded_model = PPO.load(model_save_path)
 
-        except Exception as e:
-            print(f"Error calculating raw KPIs for episode {episode + 1}: {e}")
-            # Potentially skip scoring if KPIs can't be calculated
-            continue
+    eval_env_2kpi = CustomCityEnv(
+        phase_weights=comfort_emissions_weights,
+        num_buildings=num_buildings,
+        timesteps_per_episode=timesteps_per_episode
+    )
 
-        # Scoring with Comfort and Emissions KPIs Combined
-        # The reward_calculator.phase is already set to comfort_emissions_weights
-        try:
-            # active_grid_kpis=None and active_resilience_kpis=None are default.
-            # Since w3 and w4 are 0.0, these specific active lists don't alter the score here.
-            comfort_emissions_score = reward_calculator.score(raw_kpis)
-            print(f"Episode {episode + 1} Reward (Comfort & Emissions w1=0.5, w2=0.5): {comfort_emissions_score:.4f}")
+    eval_episodes = 5
+    episode_rewards_log = []
+    all_episode_kpis_log = []
 
-            # Add score to log_entry if needed for CSV
-            log_entry['comfort_emissions_score'] = comfort_emissions_score
+    for i in range(eval_episodes):
+        obs, info = eval_env_2kpi.reset(seed=i)
+        terminated = False
+        truncated = False
+        current_episode_reward = 0
+        print(f"Starting 2-KPI Evaluation Episode {i+1}/{eval_episodes}")
 
-        except Exception as e:
-            print(f"Error scoring with Comfort & Emissions KPIs for episode {episode + 1}: {e}")
+        while not (terminated or truncated):
+            action, _states = loaded_model.predict(obs, deterministic=True)
+            obs, reward, terminated, truncated, info = eval_env_2kpi.step(action)
+            if terminated or truncated:
+                 current_episode_reward = reward
 
-        # (Placeholder) agent.learn(comfort_emissions_score)
+        print(f"2-KPI Evaluation Episode {i+1} Reward: {current_episode_reward}")
+        episode_rewards_log.append(current_episode_reward)
+        if 'episode_kpis' in info and info['episode_kpis']:
+            all_episode_kpis_log.append(info['episode_kpis'])
+        else:
+            all_episode_kpis_log.append({'error': 'missing_kpis'})
 
-    # --- After training loop ---
-    if episode_logs:
-        df_logs = pd.DataFrame(episode_logs)
-        try:
-            df_logs.to_csv('kpi_logs_comfort_emissions.csv', index=False)
-            print("\nKPI logs saved to kpi_logs_comfort_emissions.csv")
-        except Exception as e:
-            print(f"\nError saving KPI logs to CSV: {e}")
-    else:
-        print("\nNo episode logs were generated.")
+    if episode_rewards_log:
+        avg_reward = sum(episode_rewards_log) / len(episode_rewards_log) if episode_rewards_log else 0
+        print(f"Average Reward (2-KPI) over {eval_episodes} episodes: {avg_reward:.4f}")
 
-    print("\nTraining simulation finished.")
+    if all_episode_kpis_log:
+        eval_df = pd.DataFrame(all_episode_kpis_log)
+        eval_df['episode_reward'] = episode_rewards_log
+        eval_df.to_csv(EVAL_RESULTS_CSV_2KPI, index=False)
+        print(f"2-KPI Evaluation results saved to {EVAL_RESULTS_CSV_2KPI}")
+
+    eval_env_2kpi.close()
+    print("2-KPI Evaluation environment closed.")
+    print("--- 2-KPI Training and Evaluation Phase Finished ---")
+
+
+def main_multi_kpi_training(num_buildings, timesteps_per_episode):
+    """Continues training the agent with multiple KPIs, including grid impact."""
+    print("\n--- Starting Multi-KPI Training Phase ---")
+
+    # --- Configuration ---
+    multi_kpi_weights = PhaseWeights(w1=0.3, w2=0.3, w3=0.4, w4=0.0) # Example: added grid impact
+
+    # Ensure TensorBoard log directory exists
+    os.makedirs(TENSORBOARD_LOG_PATH_MULTI_BASE, exist_ok=True)
+
+    # --- Environment Setup ---
+    print(f"Setting up CustomCityEnv for Multi-KPI training (Buildings: {num_buildings}, Timesteps/Episode: {timesteps_per_episode})...")
+    env_multi_kpi = CustomCityEnv(
+        phase_weights=multi_kpi_weights,
+        num_buildings=num_buildings,
+        timesteps_per_episode=timesteps_per_episode
+    )
+
+    # --- Agent Setup: Load policy from 2-KPI model ---
+    path_to_2kpi_model = MODEL_SAVE_PATH_2KPI_BASE + ".zip"
+    print(f"Loading policy from 2-KPI model: {path_to_2kpi_model}")
+
+    # Check if the 2-KPI model exists before trying to load its policy
+    if not os.path.exists(path_to_2kpi_model):
+        print(f"Error: 2-KPI model not found at {path_to_2kpi_model}. Skipping Multi-KPI training.")
+        env_multi_kpi.close()
+        return
+
+    policy_2kpi = PPO.load(path_to_2kpi_model).policy
+
+    print(f"Instantiating new PPO agent for Multi-KPI training with loaded policy (TensorBoard logs: {TENSORBOARD_LOG_PATH_MULTI_BASE})...")
+    model_multi_kpi = PPO(
+        policy="MlpPolicy", # policy type
+        env=env_multi_kpi,
+        verbose=1,
+        tensorboard_log=TENSORBOARD_LOG_PATH_MULTI_BASE
+    )
+    model_multi_kpi.policy = policy_2kpi # Assign the loaded policy weights
+
+    # --- Agent Training (Multi-KPIs) ---
+    print(f"Starting Multi-KPI training for {TOTAL_TIMESTEPS_MULTI} timesteps...")
+    # Note: TOTAL_TIMESTEPS is set for demonstration. For robust convergence and
+    # potentially higher scores, significantly more timesteps would likely be required.
+    # reset_num_timesteps=True is default and appropriate here since it's a new PPO instance for logging.
+    model_multi_kpi.learn(
+        total_timesteps=TOTAL_TIMESTEPS_MULTI,
+        progress_bar=True
+    )
+
+    model_save_path = MODEL_SAVE_PATH_MULTI_BASE + ".zip"
+    print(f"Multi-KPI Training finished. Saving model to {model_save_path} ...")
+    model_multi_kpi.save(MODEL_SAVE_PATH_MULTI_BASE)
+
+    env_multi_kpi.close() # Close training env
+    print("Multi-KPI Training environment closed.")
+
+    # --- Evaluation/Logging for Multi-KPI Model ---
+    print("\n--- Evaluating Multi-KPI Trained Model ---")
+    loaded_model_multi = PPO.load(model_save_path)
+
+    # Use a fresh environment instance for evaluation
+    eval_env_multi_kpi = CustomCityEnv(
+        phase_weights=multi_kpi_weights,
+        num_buildings=num_buildings,
+        timesteps_per_episode=timesteps_per_episode
+    )
+
+    eval_episodes = 5
+    episode_rewards_log_multi = []
+    all_episode_kpis_log_multi = []
+
+    for i in range(eval_episodes):
+        obs, info = eval_env_multi_kpi.reset(seed=100 + i) # Use different seeds
+        terminated = False
+        truncated = False
+        current_episode_reward = 0
+        print(f"Starting Multi-KPI Evaluation Episode {i+1}/{eval_episodes}")
+
+        while not (terminated or truncated):
+            action, _states = loaded_model_multi.predict(obs, deterministic=True)
+            obs, reward, terminated, truncated, info = eval_env_multi_kpi.step(action)
+            if terminated or truncated:
+                 current_episode_reward = reward
+
+        print(f"Multi-KPI Evaluation Episode {i+1} Reward: {current_episode_reward}")
+        episode_rewards_log_multi.append(current_episode_reward)
+        if 'episode_kpis' in info and info['episode_kpis']:
+            all_episode_kpis_log_multi.append(info['episode_kpis'])
+        else:
+            all_episode_kpis_log_multi.append({'error': 'missing_kpis'})
+
+    if episode_rewards_log_multi:
+        avg_reward_multi = sum(episode_rewards_log_multi) / len(episode_rewards_log_multi) if episode_rewards_log_multi else 0
+        print(f"Average Reward (Multi-KPI) over {eval_episodes} episodes: {avg_reward_multi:.4f}")
+
+    if all_episode_kpis_log_multi:
+        eval_df_multi = pd.DataFrame(all_episode_kpis_log_multi)
+        eval_df_multi['episode_reward'] = episode_rewards_log_multi
+        eval_df_multi.to_csv(EVAL_RESULTS_CSV_MULTI, index=False)
+        print(f"Multi-KPI Evaluation results saved to {EVAL_RESULTS_CSV_MULTI}")
+
+    eval_env_multi_kpi.close()
+    print("Multi-KPI Evaluation environment closed.")
+    print("--- Multi-KPI Training and Evaluation Phase Finished ---")
+
 
 if __name__ == "__main__":
-    main()
+    NUM_BUILDINGS_MAIN = 2
+    TIMESTEPS_PER_EPISODE_MAIN = 24 * 7 # One week of hourly data
+
+    # Run 2-KPI Training Phase
+    main_2kpi_training(num_buildings=NUM_BUILDINGS_MAIN, timesteps_per_episode=TIMESTEPS_PER_EPISODE_MAIN)
+
+    # Run Multi-KPI Training Phase, continuing from the 2-KPI model
+    main_multi_kpi_training(num_buildings=NUM_BUILDINGS_MAIN, timesteps_per_episode=TIMESTEPS_PER_EPISODE_MAIN)
+
+    print("\nAll training phases complete.")
