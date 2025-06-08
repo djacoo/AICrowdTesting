@@ -13,7 +13,7 @@ Key Components:
 
 import numpy as np
 from dataclasses import dataclass
-from typing import Sequence, Mapping, Union, Dict, Any
+from typing import Sequence, Mapping, Union, Dict, Any, List
 
 @dataclass
 class PhaseWeights:
@@ -40,16 +40,16 @@ PHASE_II = PhaseWeights(w1=0.3, w2=0.1, w3=0.3, w4=0.3)  # Phase II adds resilie
 
 # Baseline KPIs for reward calculation normalization
 # These values are used to normalize the KPIs to a common scale (0-1)
-# The actual baseline values should be set based on your specific scenario
+# Updated with more realistic baseline values based on observed KPI values
 BASELINE_KPIS = {
-    "carbon_emissions": 1.0,           # Baseline for carbon emissions (kgCO2)
-    "ramping": 1.0,                    # Baseline for load ramping (kW)
-    "1-load_factor": 1.0,              # Baseline for load factor (1 - actual_load_factor)
-    "daily_peak": 1.0,                 # Baseline for daily peak demand (kW)
-    "all_time_peak": 1.0,              # Baseline for all-time peak demand (kW)
-    "unmet_hours": 1.0,                # Baseline for thermal comfort violations (hours)
-    "1-thermal_resilience": 1.0,        # Baseline for thermal resilience during outages
-    "normalized_unserved_energy": 1.0,   # Baseline for unserved energy during outages (kWh)
+    "carbon_emissions": 1500.0,        # Baseline for carbon emissions (kgCO2) - based on observed values ~1300-1500
+    "ramping": 4000.0,                 # Baseline for load ramping (kW) - based on observed values ~3500-4500
+    "1-load_factor": 0.45,             # Baseline for load factor (1 - actual_load_factor) - based on observed values ~0.4-0.48
+    "daily_peak": 90.0,                # Baseline for daily peak demand (kW) - based on observed values ~82-90
+    "all_time_peak": 100.0,            # Baseline for all-time peak demand (kW) - based on observed values ~90-98
+    "unmet_hours": 0.4,                # Baseline for thermal comfort violations (hours) - based on observed values ~0.37-0.44
+    "1-thermal_resilience": 0.04,      # Baseline for thermal resilience during outages - based on observed values ~0.02-0.06
+    "normalized_unserved_energy": 0.15, # Baseline for unserved energy during outages (kWh) - based on observed values ~0.12-0.18
 }
 
 class ControlTrackReward:
@@ -310,8 +310,8 @@ class ControlTrackReward:
         return float(np.clip(unmet.sum() / total_expected, 0.0, 1.0))
 
     def score(self, kpis: Mapping[str, float],
-              active_grid_kpis: list[str] = None,
-              active_resilience_kpis: list[str] = None) -> float:
+              active_grid_kpis: List[str] = None,
+              active_resilience_kpis: List[str] = None) -> float:
         """
         Calculate the overall control track score based on the provided KPIs.
         
@@ -398,21 +398,26 @@ class ControlTrackReward:
         score_grid = np.clip(score_grid, -1.0, 1.0)
         score_resilience = np.clip(score_resilience, -1.0, 1.0)
         
-        # Get weights from phase configuration
-        weights = self.phase
-        
         # Calculate final weighted score
-        score_control = (
-            weights.w1 * score_comfort +         # Comfort component
-            weights.w2 * score_emissions +       # Emissions component
-            weights.w3 * score_grid +            # Grid component
-            weights.w4 * score_resilience        # Resilience component
+        final_score = (
+            weights.w1 * score_comfort +     # Comfort component
+            weights.w2 * score_emissions +   # Emissions component
+            weights.w3 * score_grid +        # Grid component
+            weights.w4 * score_resilience    # Resilience component
         )
         
-        # Ensure the final score is within valid range [0,1] as per typical reward structures
-        # or allow negative total if components can be very negative.
-        # For CityLearn, scores are often expected to be positive.
-        return float(np.clip(score_control, 0.0, 1.0))
+        # Ensure the final score is within valid range [0,1]
+        final_score = float(np.clip(final_score, 0.0, 1.0))
+        
+        # Debug print to help diagnose zero scores
+        if final_score == 0.0:
+            print(f"Debug - Component scores - Comfort: {score_comfort:.4f}, Emissions: {score_emissions:.4f}, "
+                  f"Grid: {score_grid:.4f}, Resilience: {score_resilience:.4f}")
+            print(f"Debug - Weights - w1: {weights.w1}, w2: {weights.w2}, w3: {weights.w3}, w4: {weights.w4}")
+            print(f"Debug - Raw KPIs - carbon_emissions: {kpis.get('carbon_emissions', 'N/A'):.4f}, "
+                  f"unmet_hours: {kpis.get('unmet_hours', 'N/A'):.4f}")
+        
+        return final_score
 
     def get_all_kpi_values(self, environment_data: Dict[str, Any]) -> Dict[str, float]:
         """
