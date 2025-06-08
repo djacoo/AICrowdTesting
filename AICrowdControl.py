@@ -309,51 +309,94 @@ class ControlTrackReward:
             return 0.0
         return float(np.clip(unmet.sum() / total_expected, 0.0, 1.0))
 
-    def score(self, kpis: Mapping[str, float]) -> float:
+    def score(self, kpis: Mapping[str, float],
+              active_grid_kpis: list[str] = None,
+              active_resilience_kpis: list[str] = None) -> float:
         """
         Calculate the overall control track score based on the provided KPIs.
         
         The final score is a weighted sum of four main components:
         1. Comfort: Based on thermal comfort violations
         2. Emissions: Based on carbon emissions
-        3. Grid: Average of ramping, load factor, and peak metrics
-        4. Resilience: Average of thermal resilience and unserved energy metrics
+        3. Grid: Average of selected active grid KPIs (ramping, load factor, peak metrics)
+        4. Resilience: Average of selected active resilience KPIs (thermal resilience, unserved energy)
         
         Args:
             kpis (Mapping[str, float]): Dictionary containing calculated KPI values.
                                       Should include all keys present in BASELINE_KPIS.
+            active_grid_kpis (list[str], optional): List of grid KPI keys to consider.
+                                                  If None or empty, all grid KPIs are used.
+            active_resilience_kpis (list[str], optional): List of resilience KPI keys to consider.
+                                                       If None or empty, all resilience KPIs are used.
                                       
         Returns:
             float: Overall score between 0.0 and 1.0, where higher is better.
             
         Note:
-            - All KPIs are normalized by their baseline values.
+            - All KPIs are normalized by their baseline values before averaging or weighting.
             - The weights for each component are determined by the phase configuration.
-            - The grid score is the average of ramping, load factor, and peak metrics.
-            - The resilience score is the average of thermal resilience and unserved energy metrics.
         """
         # Calculate normalized scores for each KPI
         # Emissions score (lower emissions is better)
-        score_emissions = 1.0 - kpis['carbon_emissions'] / self.baseline['carbon_emissions']
+        # Clamp normalized KPI between 0 and 1 to prevent scores outside this range due to poor performance
+        norm_carbon_emissions = np.clip(kpis['carbon_emissions'] / self.baseline['carbon_emissions'], 0, 2) # allow up to 2x baseline
+        score_emissions = 1.0 - norm_carbon_emissions
         
         # Grid-related scores (lower is better for all)
-        score_ramping = 1.0 - kpis['ramping'] / self.baseline['ramping']
-        score_load_factor = 1.0 - kpis['1-load_factor'] / self.baseline['1-load_factor']
-        score_daily_peak = 1.0 - kpis['daily_peak'] / self.baseline['daily_peak']
-        score_all_time_peak = 1.0 - kpis['all_time_peak'] / self.baseline['all_time_peak']
+        # Normalization: raw_kpi / baseline_kpi. Score: 1 - normalized_kpi
+        # Clamping normalized KPIs to avoid extreme negative scores if kpi >> baseline
         
-        # Calculate composite grid score (average of grid-related metrics)
-        score_grid = (score_ramping + score_load_factor + score_daily_peak + score_all_time_peak) / 4.0
-        
+        all_normalized_grid_scores = {
+            'ramping': 1.0 - np.clip(kpis['ramping'] / self.baseline['ramping'], 0, 2),
+            '1-load_factor': 1.0 - np.clip(kpis['1-load_factor'] / self.baseline['1-load_factor'], 0, 2),
+            'daily_peak': 1.0 - np.clip(kpis['daily_peak'] / self.baseline['daily_peak'], 0, 2),
+            'all_time_peak': 1.0 - np.clip(kpis['all_time_peak'] / self.baseline['all_time_peak'], 0, 2)
+        }
+
+        if active_grid_kpis and len(active_grid_kpis) > 0:
+            selected_grid_scores = [all_normalized_grid_scores[key] for key in active_grid_kpis if key in all_normalized_grid_scores]
+            if not selected_grid_scores: # Should not happen if active_grid_kpis has valid keys
+                score_grid = 0.0
+            else:
+                score_grid = np.mean(selected_grid_scores)
+        else: # Default: use all grid KPIs
+            score_grid = np.mean(list(all_normalized_grid_scores.values()))
+
         # Resilience-related scores (lower is better in kpis, so we invert them)
-        score_thermal_resilience = 1.0 - kpis['1-thermal_resilience']
-        score_unserved_energy = 1.0 - kpis['normalized_unserved_energy']
-        
-        # Calculate composite resilience score (average of resilience metrics)
-        score_resilience = (score_thermal_resilience + score_unserved_energy) / 2.0
+        all_normalized_resilience_scores = {
+            '1-thermal_resilience': 1.0 - np.clip(kpis['1-thermal_resilience'] / self.baseline.get('1-thermal_resilience', 1.0), 0, 2), # baseline check
+            'normalized_unserved_energy': 1.0 - np.clip(kpis['normalized_unserved_energy'] / self.baseline.get('normalized_unserved_energy', 1.0), 0, 2) # baseline check
+        }
+
+        if active_resilience_kpis and len(active_resilience_kpis) > 0:
+            selected_resilience_scores = [all_normalized_resilience_scores[key] for key in active_resilience_kpis if key in all_normalized_resilience_scores]
+            if not selected_resilience_scores:
+                score_resilience = 0.0
+            else:
+                score_resilience = np.mean(selected_resilience_scores)
+        else: # Default: use all resilience KPIs
+            score_resilience = np.mean(list(all_normalized_resilience_scores.values()))
         
         # Comfort score (lower unmet_hours is better)
-        score_comfort = 1.0 - kpis['unmet_hours']
+        norm_unmet_hours = np.clip(kpis['unmet_hours'] / self.baseline['unmet_hours'], 0, 2)
+        score_comfort = 1.0 - norm_unmet_hours
+
+        # Get weights from phase configuration
+        weights = self.phase
+
+        # Calculate final weighted score
+        score_control = (
+            weights.w1 * score_comfort +         # Comfort component
+            weights.w2 * score_emissions +       # Emissions component
+            weights.w3 * score_grid +            # Grid component
+            weights.w4 * score_resilience        # Resilience component
+        )
+
+        # Ensure the component scores are also clipped before final weighted sum
+        score_comfort = np.clip(score_comfort, -1.0, 1.0) # Allow -1 for poor performance
+        score_emissions = np.clip(score_emissions, -1.0, 1.0)
+        score_grid = np.clip(score_grid, -1.0, 1.0)
+        score_resilience = np.clip(score_resilience, -1.0, 1.0)
         
         # Get weights from phase configuration
         weights = self.phase
@@ -366,5 +409,83 @@ class ControlTrackReward:
             weights.w4 * score_resilience        # Resilience component
         )
         
-        # Ensure the score is within valid range
+        # Ensure the final score is within valid range [0,1] as per typical reward structures
+        # or allow negative total if components can be very negative.
+        # For CityLearn, scores are often expected to be positive.
         return float(np.clip(score_control, 0.0, 1.0))
+
+    def get_all_kpi_values(self, environment_data: Dict[str, Any]) -> Dict[str, float]:
+        """
+        Calculates all raw KPI values based on the provided environment data.
+
+        Args:
+            environment_data (Dict[str, Any]): A dictionary containing all necessary data arrays
+                                              and parameters for the KPI calculation functions.
+                                              Expected keys include:
+                                              'e', 'emission_rate', 'temp', 'setpoint', 'band',
+                                              'occupancy', 'district_consumption', 'hours_per_day',
+                                              'outage_timesteps' (for resilience KPIs, matching time_steps),
+                                              'demand', 'served'.
+
+        Returns:
+            Dict[str, float]: A dictionary where keys are KPI names and values are their
+                              raw calculated outputs. Keys match those in BASELINE_KPIS.
+        """
+        raw_kpis = {}
+
+        # Ensure all required keys are present in environment_data, using .get() for safety or raise error
+        # For simplicity, assuming keys will be present as per typical usage.
+
+        raw_kpis['carbon_emissions'] = self.carbon_emissions(
+            environment_data['e'],
+            environment_data['emission_rate']
+        )
+        raw_kpis['unmet_hours'] = self.unmet_hours(
+            environment_data['temp'],
+            environment_data['setpoint'],
+            environment_data['band'],
+            environment_data['occupancy']
+        )
+        raw_kpis['ramping'] = self.ramping(
+            environment_data['district_consumption']
+        )
+        # load_factor returns 1 - true_load_factor, which matches '1-load_factor' key
+        raw_kpis['1-load_factor'] = self.load_factor(
+            environment_data['district_consumption'],
+            environment_data.get('hours_per_day', 24) # Use default if not provided
+        )
+        raw_kpis['daily_peak'] = self.daily_peak(
+            environment_data['district_consumption'],
+            environment_data.get('hours_per_day', 24)
+        )
+        raw_kpis['all_time_peak'] = self.all_time_peak(
+            environment_data['district_consumption']
+        )
+
+        # Resilience KPIs - Note: thermal_resilience and unserved_energy in this class
+        # expect 'outage' to be a 1D array matching timesteps.
+        # The key for thermal_resilience in BASELINE_KPIS is '1-thermal_resilience'.
+        # The method thermal_resilience() calculates the fraction of *unmet* time.
+        # So, 1.0 - self.thermal_resilience(...) would be the "resilient fraction".
+        # However, BASELINE_KPIS['1-thermal_resilience'] implies the KPI itself is "1 - raw_resilience_metric".
+        # Let's assume self.thermal_resilience returns the "bad" part (unmet fraction during outage)
+        # and it's used directly if the key is '1-thermal_resilience', implying the baseline is for this "bad" part.
+        # This seems consistent with how other scores are 1.0 - kpi/baseline.
+        # So, if thermal_resilience() returns "unmet fraction during outage", its key should be '1-thermal_resilience'.
+
+        raw_kpis['1-thermal_resilience'] = self.thermal_resilience(
+            environment_data['temp'],
+            environment_data['setpoint'],
+            environment_data['band'],
+            environment_data['occupancy'],
+            environment_data['outage_timesteps'] # Ensure this key is used in train_agent
+        )
+        # unserved_energy() returns fraction of unserved to demand during outage.
+        # Key in BASELINE_KPIS is 'normalized_unserved_energy'.
+        raw_kpis['normalized_unserved_energy'] = self.unserved_energy(
+            environment_data['demand'],
+            environment_data['served'],
+            environment_data['outage_timesteps'] # Ensure this key is used in train_agent
+        )
+
+        return raw_kpis
