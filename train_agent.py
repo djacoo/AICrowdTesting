@@ -50,8 +50,8 @@ from AICrowdControl import PhaseWeights, BASELINE_KPIS # BASELINE_KPIS is used b
 from CustomCityEnv import CustomCityEnv
 
 # --- Constants for training phases (can be overridden if needed) ---
-TOTAL_TIMESTEPS_2KPI = 100000  # Increased from 30k to 100k
-TOTAL_TIMESTEPS_MULTI = 150000  # Increased from 40k to 150k
+TOTAL_TIMESTEPS_2KPI = 200000  # MODIFIED: Increased from 100k
+TOTAL_TIMESTEPS_MULTI = 250000  # MODIFIED: Increased from 150k
 EVAL_FREQ = 5000  # Evaluate every 5k steps
 MODEL_SAVE_PATH_2KPI_BASE = "ppo_2kpi_model"
 MODEL_SAVE_PATH_MULTI_BASE = "ppo_multi_kpi_model"
@@ -207,7 +207,7 @@ def main_2kpi_training(num_buildings, timesteps_per_episode):
     
     # Initialize PPO agent with enhanced configuration for 2-KPI training
     policy_kwargs = {
-        'net_arch': dict(pi=[512, 512, 256], vf=[512, 512, 256]),  # Deeper network
+        'net_arch': dict(pi=[256, 256], vf=[256, 256]) # MODIFIED: Smaller network,
         'activation_fn': torch.nn.ReLU,  # ReLU for deeper networks
         'ortho_init': True,
         'log_std_init': -0.5,  # Slightly higher initial std for better exploration
@@ -224,12 +224,12 @@ def main_2kpi_training(num_buildings, timesteps_per_episode):
         warmup_frac = 0.2
         if progress_remaining > 1.0 - warmup_frac:
             warmup_progress = (1.0 - progress_remaining) / warmup_frac
-            return 5e-4 * warmup_progress  # Higher initial learning rate
+            return 3e-4 * warmup_progress  # MODIFIED: Lower initial LR
             
         # Cosine decay for the rest
         progress = (1.0 - progress_remaining - warmup_frac) / (1.0 - warmup_frac)
-        min_lr = 1e-5
-        max_lr = 5e-4  # Higher max learning rate
+        min_lr = 5e-6 # MODIFIED: Lower min LR
+        max_lr = 3e-4 # MODIFIED: Lower max LR
         return min_lr + 0.5 * (max_lr - min_lr) * (1 + np.cos(np.pi * progress))
     
     # Initialize the model with optimized hyperparameters
@@ -239,12 +239,12 @@ def main_2kpi_training(num_buildings, timesteps_per_episode):
         learning_rate=lr_schedule,
         n_steps=4096,           # More steps per update for better gradient estimates
         batch_size=512,         # Larger batch size for more stable updates
-        n_epochs=10,            # More epochs for better optimization
+        n_epochs=8,            # MODIFIED: Fewer epochs
         gamma=0.995,            # Slightly higher discount factor for longer-term rewards
         gae_lambda=0.97,        # Adjusted for better bias-variance tradeoff
         clip_range=0.2,         # Slightly higher clip range for more exploration
         clip_range_vf=0.2,      # Add clipping for value function
-        ent_coef=0.02,          # Slightly higher entropy for better exploration
+        ent_coef=0.025,          # MODIFIED: Increased entropy
         vf_coef=0.7,            # Higher weight on value function loss
         max_grad_norm=0.8,      # Increased gradient clipping for stability
         use_sde=False,          # Disable SDE for discrete action spaces
@@ -381,7 +381,7 @@ def main_multi_kpi_training(num_buildings, timesteps_per_episode):
     
     # Initialize PPO agent with enhanced configuration for multi-KPI training
     policy_kwargs = {
-        'net_arch': dict(pi=[512, 512, 256], vf=[512, 512, 256]),  # Deeper network
+        'net_arch': dict(pi=[256, 256], vf=[256, 256]) # MODIFIED: Smaller network,
         'activation_fn': torch.nn.ReLU,  # ReLU for deeper networks
         'ortho_init': True,
         'log_std_init': -0.5,  # Slightly higher initial std for better exploration
@@ -398,12 +398,12 @@ def main_multi_kpi_training(num_buildings, timesteps_per_episode):
         warmup_frac = 0.2
         if progress_remaining > 1.0 - warmup_frac:
             warmup_progress = (1.0 - progress_remaining) / warmup_frac
-            return 4e-4 * warmup_progress  # Slightly lower initial learning rate than 2-KPI
+            return 2e-4 * warmup_progress  # MODIFIED: Lower initial LR
             
         # Cosine decay for the rest
         progress = (1.0 - progress_remaining - warmup_frac) / (1.0 - warmup_frac)
-        min_lr = 5e-6  # Slightly lower minimum learning rate for fine-tuning
-        max_lr = 4e-4
+        min_lr = 1e-6 # MODIFIED: Lower min LR
+        max_lr = 2e-4 # MODIFIED: Lower max LR
         return min_lr + 0.5 * (max_lr - min_lr) * (1 + np.cos(np.pi * progress))
     
     # Initialize the model with optimized hyperparameters for multi-KPI training
@@ -413,12 +413,12 @@ def main_multi_kpi_training(num_buildings, timesteps_per_episode):
         learning_rate=lr_schedule,
         n_steps=4096,           # More steps per update for better gradient estimates
         batch_size=512,         # Larger batch size for more stable updates
-        n_epochs=12,            # More epochs for better optimization
+        n_epochs=10,            # MODIFIED: Fewer epochs
         gamma=0.995,            # Slightly higher discount factor for longer-term rewards
         gae_lambda=0.97,        # Adjusted for better bias-variance tradeoff
         clip_range=0.18,        # Slightly higher clip range for more exploration
         clip_range_vf=0.18,     # Add clipping for value function
-        ent_coef=0.015,         # Slightly lower entropy for more focused learning
+        ent_coef=0.02,         # MODIFIED: Increased entropy
         vf_coef=0.8,            # Higher weight on value function loss
         max_grad_norm=0.8,      # Increased gradient clipping for stability
         use_sde=False,          # Disable SDE for discrete action spaces
