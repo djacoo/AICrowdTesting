@@ -81,17 +81,22 @@ class CustomCityEnv(gym.Env):
 
         self.reward_calculator = ControlTrackReward(baseline=BASELINE_KPIS, phase=phase_weights)
 
-        # Action: 0 (low consumption target), 1 (medium), 2 (high)
-        self.action_space = spaces.Discrete(3)
+        # Enhanced action space with 5 discrete actions for more granular control
+        # 0: Very low consumption (aggressive energy saving)
+        # 1: Low consumption (energy saving)
+        # 2: Medium consumption (balanced)
+        # 3: High consumption (comfort focus)
+        # 4: Very high consumption (maximum comfort)
+        self.action_space = spaces.Discrete(5)
 
         # Calculate the expected observation size
         # For N buildings, the observation size is:
         # - N buildings * (2 metrics + 2 trends) = 4N
         # - 3 district metrics = 3
         # - 4 time features = 4
-        # - 9 action history (3 actions * 3 one-hot) = 9
-        # Total = 4N + 3 + 4 + 9 = 4N + 16
-        self.expected_obs_size = 4 * num_buildings + 16
+        # - 15 action history (3 actions * 5 one-hot) = 15
+        # Total = 4N + 3 + 4 + 15 = 4N + 22
+        self.expected_obs_size = 4 * num_buildings + 22
         
         # Define the observation space with the correct size
         self.observation_space = spaces.Box(
@@ -159,10 +164,11 @@ class CustomCityEnv(gym.Env):
         obs.append(np.sin(2 * np.pi * day_of_week / 7.0))   # Day of week (sine)
         obs.append(np.cos(2 * np.pi * day_of_week / 7.0))   # Day of week (cosine)
         
-        # Action history (last 3 actions, one-hot encoded)
-        action_history = np.zeros(3 * 3)  # 3 actions, each one-hot encoded
-        for i, action in enumerate(self.action_history[-3:], 1):  # Last 3 actions
-            action_history[(i-1)*3 + action] = 1.0
+        # Action history (last 3 actions, one-hot encoded for 5 possible actions)
+        action_history = np.zeros(3 * 5)  # 3 actions, each one-hot encoded for 5 possible actions
+        for i, action in enumerate(self.action_history[-3:]):  # Last 3 actions
+            if i < 3:  # Ensure we don't go out of bounds
+                action_history[i*5 + min(action, 4)] = 1.0  # Cap action at 4 (0-4 range)
         obs.extend(action_history)
         
         return np.array(obs, dtype=np.float32)
@@ -213,14 +219,16 @@ class CustomCityEnv(gym.Env):
         # Store the action in history before processing
         self.action_history.append(action)
 
-        # Apply the action to influence the environment state
-        # Action 0: Low consumption target (more aggressive energy saving)
+        # Apply the action to influence the environment state with stronger effects
+        # Action 0: Low consumption target (aggressive energy saving)
         # Action 1: Medium consumption target (balanced approach)
-        # Action 2: High consumption target (prioritize comfort)
+        # Enhanced action effects with 5 discrete levels
         action_effect = {
-            0: 0.8,  # Reduce consumption by 20%
-            1: 1.0,  # No change
-            2: 1.2   # Increase consumption by 20%
+            0: 0.4,   # Very low (60% reduction)
+            1: 0.7,   # Low (30% reduction)
+            2: 1.0,   # Medium (no change)
+            3: 1.4,   # High (40% increase)
+            4: 1.8    # Very high (80% increase)
         }[action]
         
         # Apply action effect to the current timestep's consumption
@@ -228,11 +236,11 @@ class CustomCityEnv(gym.Env):
             # Apply action effect to electricity consumption for all buildings
             self.episode_data['e'][self.current_timestep] *= action_effect
             
-            # Ensure consumption stays within reasonable bounds (10% to 200% of original)
+            # Ensure consumption stays within reasonable but wider bounds
             self.episode_data['e'][self.current_timestep] = np.clip(
                 self.episode_data['e'][self.current_timestep],
-                0.1,  # Minimum 10% of original consumption
-                2.0    # Maximum 200% of original consumption
+                0.3,  # Minimum 30% of original consumption (less extreme minimum)
+                2.5   # Maximum 250% of original consumption (wider range)
             )
             
             # Update district consumption
@@ -278,28 +286,66 @@ class CustomCityEnv(gym.Env):
                 # MODIFIED: 'peaks': 0.05 * (1.0 - min(1.0, peaks / 100.0))
                 # MODIFIED: }
                 
-                # Calculate base reward
-                reward = base_reward # MODIFIED: Use score from AICrowdControl
+                # Enhanced reward shaping with clearer learning signals and curriculum
                 
-                # Add shaped rewards for better learning
-                # 1. Bonus for maintaining comfort
-                if comfort_score > 0.95:
-                    reward += 0.05 # MODIFIED: Bonus reduced
+                # 1. Base reward with adaptive scaling
+                reward = 10.0 * base_reward  # Slightly reduced base scaling
+                
+                # 2. Comfort component (sharper distinction with adaptive thresholds)
+                comfort_bonus = 0.0
+                if comfort_score > 0.9:
+                    comfort_bonus = 15.0 * (comfort_score - 0.9)  # Strong reward for good comfort
+                elif comfort_score < 0.7:
+                    comfort_bonus = -7.5 * (0.7 - comfort_score)  # Penalty for poor comfort
+                
+                # 3. Emissions component (progressive rewards/penalties with adaptive thresholds)
+                emissions_bonus = 0.0
+                if emissions_score > 0.85:
+                    emissions_bonus = 10.0 * (emissions_score - 0.85)  # Strong reward for good emissions
+                elif emissions_score < 0.4:
+                    emissions_bonus = -5.0 * (0.4 - emissions_score)  # Penalty for high emissions
+                
+                # 4. Action consistency (adaptive penalties based on progress)
+                action_penalty = 0.0
+                if hasattr(self, 'last_action') and action is not None and len(self.action_history) > 0:
+                    # Normalized action change (0-1 range)
+                    action_change = abs(action - self.last_action) / 4.0
                     
-                # 2. Bonus for low emissions
-                if emissions_score > 0.9:
-                    reward += 0.05 # MODIFIED: Bonus reduced
+                    # Progress-based penalty scaling
+                    progress = self.current_timestep / self.timesteps_per_episode
+                    penalty_scale = 1.0 + (2.0 * progress)  # Increase penalty as episode progresses
                     
-                # 3. Penalize extreme actions (encourage smoother control)
-                if hasattr(self, 'last_action') and action is not None:
-                    action_change = abs(action - self.last_action)
-                    reward -= 0.1 * action_change  # Small penalty for large action changes
+                    # Quadratic penalty for large changes
+                    action_penalty = penalty_scale * 1.5 * (action_change ** 2)
+                    
+                    # Detect and penalize oscillation patterns
+                    if len(self.action_history) > 2:
+                        # Check for back-and-forth between actions
+                        if (action == self.action_history[-2] and 
+                            abs(action - self.last_action) > 2):
+                            action_penalty += 2.0
                 
-                # Scale reward to a reasonable range
-                reward = 10.0 * reward
+                # 5. Progress bonus (increases non-linearly with progress)
+                progress = self.current_timestep / self.timesteps_per_episode
+                progress_bonus = 2.0 * (progress ** 1.5)  # Slightly faster increase
                 
-                # Clip to stable range
-                reward = np.clip(reward, -5.0, 15.0)
+                # 6. Terminal reward for completing the episode successfully
+                terminal_bonus = 0.0
+                if done and progress >= 0.95:  # Only give bonus if episode completes
+                    # Scale terminal bonus with performance
+                    performance = (comfort_score + emissions_score) / 2.0
+                    terminal_bonus = 15.0 * (performance ** 2)  # Quadratic scaling
+                
+                # Combine all components with weighted sum
+                reward = (reward + 
+                        comfort_bonus + 
+                        emissions_bonus - 
+                        action_penalty + 
+                        progress_bonus +
+                        terminal_bonus)
+                
+                # Scale and clip the final reward with asymmetric bounds
+                reward = np.clip(reward, -15.0, 25.0)  # Wider range with stronger penalties
                 
                 # Store detailed info for analysis
                 info = {
