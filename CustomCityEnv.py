@@ -7,8 +7,8 @@ and the AICrowdControl module for KPI calculation and reward scoring.
 The environment is designed for episodic rewards, where KPIs and scores are
 calculated at the end of each episode.
 """
-import gymnasium as gym
-from gymnasium import spaces
+import gym
+from gym import spaces
 import numpy as np
 import pandas as pd # Required for generate_dummy_environment_data
 from AICrowdControl import ControlTrackReward, PhaseWeights, BASELINE_KPIS # Assuming AICrowdControl.py is in the same directory or accessible in PYTHONPATH
@@ -130,75 +130,49 @@ class CustomCityEnv(gym.Env):
 
         return obs
 
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed) # Important for Gymnasium compatibility
-        if seed is not None:
-            np.random.seed(seed) # Seed numpy for reproducible data generation
-
+    def reset(self):
         self.current_timestep = 0
         # The action passed to generate_dummy_environment_data here is None,
         # as it's the start of the episode before any agent action.
         self.episode_data = generate_dummy_environment_data(self.timesteps_per_episode, self.num_buildings, action=None)
-        return self._get_observation(), {} # Gymnasium reset returns obs, info
+        return self._get_observation()  # Original gym reset returns just the observation
 
     def step(self, action):
         if self.episode_data is None:
             raise Exception("Must call reset() before step()")
 
-        # The current `generate_dummy_environment_data` generates data for the whole episode.
-        # The 'action' in this version of the environment doesn't directly alter the pre-generated
-        # data for the *current* step. Instead, the idea was that an action could influence
-        # the *next* call to `generate_dummy_environment_data` or a more fine-grained data generator.
-        # For now, the action's effect is conceptualized in how `generate_dummy_environment_data`
-        # *could* use it, but it won't change the current timestep's data if it was all generated in reset().
-
-        # To make the action have an immediate effect on the current episode's progression,
-        # we would need to modify `generate_dummy_environment_data` to take the current state
-        # and action to produce the *next* state.
-        # This is a limitation of using the current `generate_dummy_environment_data` directly.
-
-        # For this iteration, let's assume the action primarily influences the *reward calculation*
-        # or is used by a learning agent to decide what to do, even if the underlying data generation
-        # for the episode is fixed at reset(). The key is that the agent learns a policy.
-        # The provided `generate_dummy_environment_data` has a simple hook for action.
-        # To make it more meaningful for `step`, we could regenerate a *portion* of data or
-        # have the action influence how KPIs are aggregated for the reward.
-        # However, the plan is to use `stable-baselines3`, which expects the environment to react to actions.
-
-        # Let's refine: The action taken at step t should influence state t+1.
-        # The current `generate_dummy_environment_data` is not structured for that.
-        #
-        # Simplification for first pass: The `action` argument in `generate_dummy_environment_data`
-        # was added to the subtask. If this function is called *per step*, then it can work.
-        # But the current env design calls it per episode in `reset()`.
-        #
-        # To make `step` meaningful with an action influencing the *current* episode's progression:
-        # We must assume that `action` taken at `current_timestep` influences the data observed at `current_timestep`.
-        # This means `_get_observation()` must reflect data that has been influenced by `action`.
-        # The `generate_dummy_environment_data` was modified in the subtask to accept an action.
-        # Let's assume `reset` generates initial state, and `step` *could* use the action to
-        # slightly perturb the current timestep's data from `self.episode_data` or that
-        # the effect of an action is on the *next* state generation, which is complex with dummy data.
-
-        # For now, the action's effect in `generate_dummy_environment_data` (called in `reset`) is global for the episode.
-        # This is not ideal for typical RL step-by-step interaction.
-        # A better `CustomCityEnv` would involve a more stateful data generation or use CityLearn directly.
-        #
-        # Let's proceed with the current structure and refine if SB3 struggles significantly.
-        # The agent's action will be passed to reward calculation or a conceptual 'agent influence' part.
-
-        # The observation for the current step was already determined by `_get_observation`
-        # if called after `reset` or the previous `step`.
-        # Now we need to calculate reward based on the data *at* `self.current_timestep`.
-
-        # To correctly implement `step(self, action)`:
-        # 1. The `action` should influence the *next* state.
-        # 2. Or, `action` influences immediate rewards if the state transition is fixed for the episode.
-        #
-        # Given `generate_dummy_environment_data` generates a whole episode, the current action
-        # cannot change the data for `self.current_timestep` if it was all pre-generated.
-        # The `action` parameter in `generate_dummy_environment_data` will only take effect
-        # when `generate_dummy_environment_data` is called (i.e. in `reset`).
+        # Get the current observation before updating the timestep
+        obs = self._get_observation()
+        
+        # Convert action to integer if it's a numpy array
+        action_int = int(action) if isinstance(action, (np.ndarray, np.generic)) else action
+        
+        # Calculate reward based on the current action and state
+        # Action 0: Low consumption (good) -> higher reward
+        # Action 1: Medium consumption (neutral) -> medium reward
+        # Action 2: High consumption (bad) -> lower reward
+        action_penalties = {0: -0.2, 1: -0.5, 2: -1.0}  # Penalties for each action
+        
+        # Get the current energy consumption for this timestep
+        current_energy = np.sum(self.episode_data['e'][self.current_timestep])
+        
+        # Calculate reward based on action and energy consumption
+        # We want to minimize both the action penalty and the energy consumption
+        reward = -action_penalties[action_int] - (current_energy * 0.01)  # Scale down energy term to reasonable range
+        
+        # Move to the next timestep
+        self.current_timestep += 1
+        
+        # Check if the episode is done
+        done = self.current_timestep >= self.timesteps_per_episode
+        
+        # Info dictionary (can be empty)
+        info = {}
+        
+        # Get the next observation (or the same one if done)
+        next_obs = self._get_observation() if not done else None
+        
+        return next_obs, reward, done, info
         #
         # This means the current environment structure is more like a "contextual bandit"
         # for the whole episode if action in `reset` sets the context, or the action in `step`

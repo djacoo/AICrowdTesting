@@ -87,17 +87,15 @@ def main_2kpi_training(num_buildings, timesteps_per_episode):
     all_episode_kpis_log = []
 
     for i in range(eval_episodes):
-        obs, info = eval_env_2kpi.reset(seed=i)
-        terminated = False
-        truncated = False
+        obs = eval_env_2kpi.reset()
+        done = False
         current_episode_reward = 0
         print(f"Starting 2-KPI Evaluation Episode {i+1}/{eval_episodes}")
 
-        while not (terminated or truncated):
+        while not done:
             action, _states = loaded_model.predict(obs, deterministic=True)
-            obs, reward, terminated, truncated, info = eval_env_2kpi.step(action)
-            if terminated or truncated:
-                 current_episode_reward = reward
+            obs, reward, done, info = eval_env_2kpi.step(action)
+            current_episode_reward += reward
 
         print(f"2-KPI Evaluation Episode {i+1} Reward: {current_episode_reward}")
         episode_rewards_log.append(current_episode_reward)
@@ -193,17 +191,15 @@ def main_multi_kpi_training(num_buildings, timesteps_per_episode):
     all_episode_kpis_log_multi = []
 
     for i in range(eval_episodes):
-        obs, info = eval_env_multi_kpi.reset(seed=100 + i) # Use different seeds
-        terminated = False
-        truncated = False
+        obs = eval_env_multi_kpi.reset()
+        done = False
         current_episode_reward = 0
         print(f"Starting Multi-KPI Evaluation Episode {i+1}/{eval_episodes}")
 
-        while not (terminated or truncated):
+        while not done:
             action, _states = loaded_model_multi.predict(obs, deterministic=True)
-            obs, reward, terminated, truncated, info = eval_env_multi_kpi.step(action)
-            if terminated or truncated:
-                 current_episode_reward = reward
+            obs, reward, done, info = eval_env_multi_kpi.step(action)
+            current_episode_reward += reward
 
         print(f"Multi-KPI Evaluation Episode {i+1} Reward: {current_episode_reward}")
         episode_rewards_log_multi.append(current_episode_reward)
