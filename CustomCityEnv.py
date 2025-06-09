@@ -84,86 +84,294 @@ class CustomCityEnv(gym.Env):
         # Action: 0 (low consumption target), 1 (medium), 2 (high)
         self.action_space = spaces.Discrete(3)
 
-        # Observation space:
-        # For simplicity, let's define a fixed-size observation.
-        # This needs to be carefully designed based on what the agent should see.
-        # Example: [building1_e, building2_e, emission_rate_t, building1_temp, building2_temp, district_consumption_t, outage_t]
-        # This is a simplified observation for num_buildings=2.
-        # A more general approach would be to flatten selected parts of environment_data.
-        # Let's assume a fixed number of buildings for now for simplicity of observation space definition.
-        # Observation: [e_b1, e_b2, temp_b1, temp_b2, district_consumption_t, emission_rate_t, outage_t]
-        # All are floats. outage_t will be 1.0 if True, 0.0 if False.
-        obs_size = self.num_buildings * 2 + 3 # (e for each building, temp for each building) + district_consumption + emission_rate + outage
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_size,), dtype=np.float32)
+        # Calculate the expected observation size
+        # For N buildings, the observation size is:
+        # - N buildings * (2 metrics + 2 trends) = 4N
+        # - 3 district metrics = 3
+        # - 4 time features = 4
+        # - 9 action history (3 actions * 3 one-hot) = 9
+        # Total = 4N + 3 + 4 + 9 = 4N + 16
+        self.expected_obs_size = 4 * num_buildings + 16
+        
+        # Define the observation space with the correct size
+        self.observation_space = spaces.Box(
+            low=-np.inf, 
+            high=np.inf, 
+            shape=(self.expected_obs_size,),
+            dtype=np.float32
+        )
 
         self.episode_data = None # To store data for the current episode
 
     def _get_observation(self):
-        # Construct observation for the current timestep
-        obs = np.zeros(self.observation_space.shape, dtype=np.float32)
-
-        # Note: The observation vector structure is fixed based on current components:
-        # [e_building1, ..., e_buildingN, temp_building1, ..., temp_buildingN, district_consumption, emission_rate, outage_flag]
-        # If more observation components are added, this logic and `obs_size` in __init__ need updates.
-
+        """Construct observation vector with enhanced state information.
+        
+        The observation includes:
+        - Building-level metrics (consumption, temperature, setpoints, occupancy)
+        - District-level metrics (aggregate consumption, emission rates)
+        - Time features (hour of day, day of week)
+        - Recent history statistics (moving averages, trends)
+        - Action history (last few actions)
+        """
+        # Initialize observation vector with zeros
+        obs = []
+        
         # Ensure data is available
         if self.episode_data is None or self.current_timestep >= self.timesteps_per_episode:
-            # This should not happen if reset() is called correctly and current_timestep is managed.
-            # Return a zero observation or handle error appropriately.
             print("Warning: _get_observation called with no data or at end of episode.")
-            return obs
-
-        # Example: [e_b1, e_b2, temp_b1, temp_b2, district_consumption_t, emission_rate_t, outage_t]
-        obs_idx = 0
-        for i in range(self.num_buildings):
-            obs[obs_idx] = self.episode_data['e'][self.current_timestep, i]
-            obs_idx += 1
-        for i in range(self.num_buildings):
-            obs[obs_idx] = self.episode_data['temp'][self.current_timestep, i]
-            obs_idx += 1
-
-        obs[obs_idx] = self.episode_data['district_consumption'][self.current_timestep]
-        obs_idx += 1
-        obs[obs_idx] = self.episode_data['emission_rate'][self.current_timestep]
-        obs_idx += 1
-        obs[obs_idx] = 1.0 if self.episode_data['outage_timesteps'][self.current_timestep] else 0.0
-
-        return obs
+            return np.zeros(self.observation_space.shape, dtype=np.float32)
+        
+        # Track building-specific features
+        for b in range(self.num_buildings):
+            # Current timestep values
+            current_e = self.episode_data['e'][self.current_timestep, b]
+            current_temp = self.episode_data['temp'][self.current_timestep, b]
+            
+            # Add normalized features
+            obs.append(current_e / 100.0)  # Normalized consumption (assuming max 100 kW)
+            obs.append((current_temp - 15.0) / 10.0)  # Normalized temperature around 20°C
+            
+            # Add short-term trends (difference from previous timestep)
+            if self.current_timestep > 0:
+                prev_e = self.episode_data['e'][self.current_timestep-1, b]
+                prev_temp = self.episode_data['temp'][self.current_timestep-1, b]
+                obs.append((current_e - prev_e) / 10.0)  # Consumption trend
+                obs.append((current_temp - prev_temp) / 5.0)  # Temperature trend
+            else:
+                obs.extend([0.0, 0.0])  # No trend data for first step
+        
+        # District-level metrics
+        district_consumption = self.episode_data['district_consumption'][self.current_timestep]
+        emission_rate = self.episode_data['emission_rate'][self.current_timestep]
+        outage = self.episode_data['outage_timesteps'][self.current_timestep]
+        
+        obs.append(district_consumption / 1000.0)  # Normalized district consumption
+        obs.append(emission_rate / 1000.0)  # Normalized emission rate
+        obs.append(1.0 if outage else 0.0)  # Binary outage flag
+        
+        # Time features
+        hour_of_day = self.current_timestep % 24
+        day_of_week = (self.current_timestep // 24) % 7
+        
+        # Circular encoding for time features (sine/cosine)
+        obs.append(np.sin(2 * np.pi * hour_of_day / 24.0))  # Hour of day (sine)
+        obs.append(np.cos(2 * np.pi * hour_of_day / 24.0))  # Hour of day (cosine)
+        obs.append(np.sin(2 * np.pi * day_of_week / 7.0))   # Day of week (sine)
+        obs.append(np.cos(2 * np.pi * day_of_week / 7.0))   # Day of week (cosine)
+        
+        # Action history (last 3 actions, one-hot encoded)
+        action_history = np.zeros(3 * 3)  # 3 actions, each one-hot encoded
+        for i, action in enumerate(self.action_history[-3:], 1):  # Last 3 actions
+            action_history[(i-1)*3 + action] = 1.0
+        obs.extend(action_history)
+        
+        return np.array(obs, dtype=np.float32)
 
     def reset(self):
         self.current_timestep = 0
-        # The action passed to generate_dummy_environment_data here is None,
-        # as it's the start of the episode before any agent action.
-        self.episode_data = generate_dummy_environment_data(self.timesteps_per_episode, self.num_buildings, action=None)
-        return self._get_observation()  # Original gym reset returns just the observation
+        # Initialize or clear action history
+        self.action_history = []
+        
+        # Generate new episode data
+        self.episode_data = generate_dummy_environment_data(
+            self.timesteps_per_episode, 
+            self.num_buildings, 
+            action=None
+        )
+        
+        # Generate new episode data
+        self.episode_data = generate_dummy_environment_data(
+            self.timesteps_per_episode, 
+            self.num_buildings, 
+            action=None
+        )
+        
+        # Get initial observation
+        obs = self._get_observation()
+        
+        # Verify observation shape matches the space
+        if obs.shape[0] != self.expected_obs_size:
+            raise ValueError(
+                f"Observation shape {obs.shape} does not match expected shape "
+                f"({self.expected_obs_size},). Please check _get_observation() implementation."
+            )
+        
+        return obs
 
     def step(self, action):
         if self.episode_data is None:
             raise Exception("Must call reset() before step()")
 
-        # action parameter is part of the gym API. It's not used in this specific
-        # step logic as episode data is pre-generated at reset.
-        # The learning algorithm uses it to associate states with chosen actions.
+        # Convert action to integer if it's a numpy array
+        if isinstance(action, np.ndarray):
+            action = int(action.item())
+            
+        # Validate action
+        if not self.action_space.contains(action):
+            raise ValueError(f"Invalid action {action}. Must be in {self.action_space}")
+            
+        # Store the action in history before processing
+        self.action_history.append(action)
 
+        # Apply the action to influence the environment state
+        # Action 0: Low consumption target (more aggressive energy saving)
+        # Action 1: Medium consumption target (balanced approach)
+        # Action 2: High consumption target (prioritize comfort)
+        action_effect = {
+            0: 0.8,  # Reduce consumption by 20%
+            1: 1.0,  # No change
+            2: 1.2   # Increase consumption by 20%
+        }[action]
+        
+        # Apply action effect to the current timestep's consumption
+        if 'e' in self.episode_data and self.current_timestep < self.timesteps_per_episode:
+            # Apply action effect to electricity consumption for all buildings
+            self.episode_data['e'][self.current_timestep] *= action_effect
+            
+            # Ensure consumption stays within reasonable bounds (10% to 200% of original)
+            self.episode_data['e'][self.current_timestep] = np.clip(
+                self.episode_data['e'][self.current_timestep],
+                0.1,  # Minimum 10% of original consumption
+                2.0    # Maximum 200% of original consumption
+            )
+            
+            # Update district consumption
+            if 'district_consumption' in self.episode_data:
+                self.episode_data['district_consumption'][self.current_timestep] = np.sum(
+                    self.episode_data['e'][self.current_timestep]
+                )
+
+        # Increment timestep and check if episode is done
         self.current_timestep += 1
-        done = False
-        reward = 0.0  # Default reward for intermediate steps
+        done = self.current_timestep >= self.timesteps_per_episode
         info = {}
-
-        if self.current_timestep >= self.timesteps_per_episode:
-            done = True
+        
+        # Calculate intermediate reward based on current timestep
+        reward = 0.0
+        
+        if done:
             try:
+                # Calculate final KPIs for the episode
                 raw_kpis = self.reward_calculator.get_all_kpi_values(self.episode_data)
-                reward = float(self.reward_calculator.score(raw_kpis)) # Ensure reward is float
-                info = {'episode_kpis': raw_kpis}
+                
+                # Get individual KPI components
+                emissions = raw_kpis.get('carbon_emissions', 1000)
+                unmet_hours = raw_kpis.get('unmet_hours', 1.0)
+                ramping = raw_kpis.get('ramping', 0)
+                load_factor = raw_kpis.get('load_factor', 0)
+                peaks = raw_kpis.get('peaks', 0)
+                resilience = raw_kpis.get('resilience', 0)
+                
+                # Calculate individual scores (0-1 range, higher is better)
+                comfort_score = 1.0 - min(1.0, unmet_hours)
+                emissions_score = np.exp(-emissions / 500.0)  # Exponential scaling
+                
+                # Calculate base reward from all KPIs
+                base_reward = float(self.reward_calculator.score(raw_kpis))
+                
+                # Enhanced reward shaping with better scaling and shaping
+                reward_components = {
+                    'comfort': 0.5 * comfort_score,
+                    'emissions': 0.4 * emissions_score,
+                    'ramping': 0.05 * (1.0 - min(1.0, ramping / 50.0)),
+                    'load_factor': 0.05 * load_factor,
+                    'peaks': 0.05 * (1.0 - min(1.0, peaks / 100.0))
+                }
+                
+                # Calculate base reward
+                reward = sum(reward_components.values())
+                
+                # Add shaped rewards for better learning
+                # 1. Bonus for maintaining comfort
+                if comfort_score > 0.95:
+                    reward += 0.5
+                    
+                # 2. Bonus for low emissions
+                if emissions_score > 0.9:
+                    reward += 0.5
+                    
+                # 3. Penalize extreme actions (encourage smoother control)
+                if hasattr(self, 'last_action') and action is not None:
+                    action_change = abs(action - self.last_action)
+                    reward -= 0.1 * action_change  # Small penalty for large action changes
+                
+                # Scale reward to a reasonable range
+                reward = 10.0 * reward
+                
+                # Clip to stable range
+                reward = np.clip(reward, -5.0, 15.0)
+                
+                # Store detailed info for analysis
+                info = {
+                    'episode_kpis': raw_kpis,
+                    'comfort_score': comfort_score,
+                    'emissions_score': emissions_score,
+                    'carbon_emissions': emissions,
+                    'unmet_hours': unmet_hours,
+                    'ramping': ramping,
+                    'load_factor': load_factor,
+                    'peaks': peaks,
+                    'resilience': resilience,
+                    'reward_components': {
+                        'comfort': comfort_score,
+                        'emissions': emissions_score,
+                        'ramping': 1.0 - min(1.0, ramping / 50.0),
+                        'load_factor': load_factor,
+                        'peaks': 1.0 - min(1.0, peaks / 100.0)
+                    }
+                }
+                
             except Exception as e:
                 print(f"Error calculating KPIs/reward at end of episode: {e}")
-                reward = -1.0 # Penalize if KPI calculation fails, ensure float
+                reward = -5.0  # Significant penalty for failure
                 info = {'error': str(e)}
-
+                
             observation = np.zeros(self.observation_space.shape, dtype=np.float32)
         else:
-            observation = self._get_observation() # Fetches observation for s_{t+1}
+            # Calculate a small intermediate reward based on current state
+            # This helps guide the learning process
+            try:
+                # Get current timestep data
+                current_data = {k: v[:self.current_timestep+1] for k, v in self.episode_data.items() 
+                              if isinstance(v, (list, np.ndarray)) and len(v) > self.current_timestep}
+                
+                # Calculate intermediate KPIs for the current episode segment
+                raw_kpis = self.reward_calculator.get_all_kpi_values(current_data)
+                
+                # Intermediate reward with better shaping
+                comfort_score = 1.0 - min(1.0, raw_kpis.get('unmet_hours', 1.0))
+                emissions = raw_kpis.get('carbon_emissions', 1000)
+                emissions_score = np.exp(-emissions / 500.0)
+                
+                # Calculate base reward components
+                reward_components = {
+                    'comfort': 0.6 * comfort_score,
+                    'emissions': 0.4 * emissions_score
+                }
+                
+                # Calculate base reward
+                reward = sum(reward_components.values())
+                
+                # Add exploration bonus (decaying with time)
+                if not hasattr(self, 'last_action'):
+                    self.last_action = action
+                    self.exploration_bonus = 0.1
+                else:
+                    # Decaying exploration bonus
+                    self.exploration_bonus = max(0.01, self.exploration_bonus * 0.999)
+                    if action != self.last_action:
+                        reward += self.exploration_bonus
+                    self.last_action = action
+                
+                # Scale and clip intermediate reward
+                reward = 2.0 * reward  # Scale to (0-2) range
+                reward = np.clip(reward, -0.5, 3.0)  # Allow small negative rewards
+                
+            except Exception as e:
+                # If something goes wrong with intermediate reward, continue with zero reward
+                reward = 0.0
+                
+            observation = self._get_observation()  # Get next observation
 
         return observation, reward, done, info
 
