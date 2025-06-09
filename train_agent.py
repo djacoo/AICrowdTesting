@@ -52,165 +52,102 @@ def smooth_data(y, window_size=5):
     
     return smoothed, rolling_std
 
-def plot_training_results(window_size=10):
-    """
-    Plot training progress with smoothed curves and confidence intervals.
-    
-    Args:
-        window_size: Size of the moving average window for smoothing
-    """
+def plot_training_results(window_size=25):
+    """Generate training and KPI visualisations using a unified style."""
     try:
         import glob
         import pandas as pd
-        import seaborn as sns
         from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
-        
-        # Set style
-        sns.set_style("whitegrid")
-        sns.set_palette("colorblind")
-        plt.rcParams['figure.facecolor'] = 'white'
-        
-        # Create figure with subplots
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 12), gridspec_kw={'height_ratios': [2, 1]})
-        
-        # --- Training Curves ---
-        print("\nGenerating training curves...")
-        
-        for log_dir, label, color in [
-            (TENSORBOARD_LOG_PATH_2KPI_BASE, "2-KPI Training", "#1f77b4"),
-            (TENSORBOARD_LOG_PATH_MULTI_BASE, "Multi-KPI Training", "#ff7f0e")
+
+        def load_rewards(log_base):
+            """Load reward history from all runs under a directory."""
+            runs = [d for d in glob.glob(os.path.join(log_base, '*')) if os.path.isdir(d)]
+            if not runs:
+                runs = [log_base]
+            histories = []
+            for run in runs:
+                event_files = glob.glob(os.path.join(run, 'events.out.tfevents.*'))
+                if not event_files:
+                    continue
+                event_file = max(event_files, key=os.path.getmtime)
+                acc = EventAccumulator(run)
+                acc.Reload()
+                if 'rollout/ep_rew_mean' not in acc.Tags()['scalars']:
+                    continue
+                events = acc.Scalars('rollout/ep_rew_mean')
+                steps = [e.step for e in events]
+                rewards = [e.value for e in events]
+                histories.append(pd.Series(rewards, index=steps))
+            if histories:
+                return pd.concat(histories, axis=1)
+            return None
+
+        # Load reward histories
+        history_2kpi = load_rewards(TENSORBOARD_LOG_PATH_2KPI_BASE)
+        history_multi = load_rewards(TENSORBOARD_LOG_PATH_MULTI_BASE)
+
+        fig, ax1 = plt.subplots(1, 1, figsize=(10, 5))
+
+        for df, label, color in [
+            (history_2kpi, '2-KPI Training', 'green'),
+            (history_multi, 'Multi-KPI Training', 'orange')
         ]:
-            event_files = []
-            event_files.extend(glob.glob(f"{log_dir}*/events.out.tfevents.*"))
-            event_files.extend(glob.glob(f"{log_dir}events.out.tfevents.*"))
-            
-            if not event_files:
-                print(f"No event files found for {label}")
+            if df is None:
                 continue
-                
-            try:
-                latest_event_file = max(event_files, key=os.path.getmtime)
-                print(f"Processing {label} data from: {os.path.basename(latest_event_file)}")
-                
-                event_acc = EventAccumulator(os.path.dirname(latest_event_file) if os.path.isdir(os.path.dirname(latest_event_file)) else log_dir)
-                event_acc.Reload()
-                
-                if 'rollout/ep_rew_mean' in event_acc.Tags()['scalars']:
-                    events = event_acc.Scalars('rollout/ep_rew_mean')
-                    steps = np.array([e.step for e in events])
-                    values = np.array([e.value for e in events])
-                    
-                    if len(values) > 0:
-                        # Apply smoothing
-                        smoothed_values, rolling_std = smooth_data(values, window_size=window_size)
-                        
-                        # Plot main line with confidence interval
-                        ax1.plot(steps, smoothed_values, label=label, color=color, linewidth=2)
-                        ax1.fill_between(steps, 
-                                       smoothed_values - rolling_std, 
-                                       smoothed_values + rolling_std,
-                                       color=color, alpha=0.15, linewidth=0)
-                        
-                        # Add start and end markers
-                        ax1.scatter(steps[0], smoothed_values[0], color='green', marker='^', 
-                                 s=100, zorder=5, label=f"{label} Start" if label == "2-KPI Training" else "")
-                        ax1.scatter(steps[-1], smoothed_values[-1], color='red', marker='v', 
-                                 s=100, zorder=5, label=f"{label} End" if label == "Multi-KPI Training" else "")
-                        
-            except Exception as e:
-                print(f"Error processing {label} data: {str(e)}")
-        
-        # Format training plot
-        ax1.set_title('Training Progress with Confidence Intervals', fontsize=14, pad=20)
-        ax1.set_xlabel('Training Steps', fontsize=12)
-        ax1.set_ylabel('Average Reward', fontsize=12)
-        ax1.legend(loc='lower right', fontsize=10)
-        ax1.grid(True, alpha=0.2)
-        
+            df.columns = [f'Run {i+1}' for i in range(df.shape[1])]
+            mean = df.mean(axis=1)
+            std = df.std(axis=1)
+            smoothed = mean.rolling(window=window_size, min_periods=1).mean()
+
+            ax1.plot(smoothed, linewidth=2, label=label, color=color)
+            ax1.fill_between(mean.index, mean - std, mean + std, color=color, alpha=0.1, label=f'{label} ±1 std')
+
+        ax1.set_title('Training Reward')
+        ax1.set_xlabel('Step')
+        ax1.set_ylabel('Reward')
+        ax1.legend()
+        ax1.grid(True)
+
         # --- KPI Metrics ---
-        print("\nGenerating KPI metrics...")
         eval_dfs = []
         for csv_file, label, color in [
-            (EVAL_RESULTS_CSV_2KPI, "2-KPI Eval", "#1f77b4"),
-            (EVAL_RESULTS_CSV_MULTI, "Multi-KPI Eval", "#ff7f0e")
+            (EVAL_RESULTS_CSV_2KPI, '2-KPI Eval', 'green'),
+            (EVAL_RESULTS_CSV_MULTI, 'Multi-KPI Eval', 'orange')
         ]:
-            try:
-                if os.path.exists(csv_file):
-                    df = pd.read_csv(csv_file)
-                    if not df.empty and 'episode_reward' in df.columns:
-                        eval_dfs.append((df, label, color))
-                        print(f"Processed evaluation data from {os.path.basename(csv_file)}: {len(df)} episodes")
-            except Exception as e:
-                print(f"Error loading {csv_file}: {str(e)}")
-        
+            if os.path.exists(csv_file):
+                df = pd.read_csv(csv_file)
+                if not df.empty and 'episode_reward' in df.columns:
+                    eval_dfs.append((df, label, color))
+
         if eval_dfs:
-            kpi_data = []
-            kpi_cols = [col for col in eval_dfs[0][0].columns if col.startswith('KPI_')]
-            
+            fig2, ax2 = plt.subplots(1, 1, figsize=(10, 5))
+            kpi_cols = [c for c in eval_dfs[0][0].columns if c.startswith('KPI_')]
             if kpi_cols:
-                kpi_names = [k[4:].replace('_', ' ').title() for k in kpi_cols]
-                x = np.arange(len(kpi_names))
+                names = [k[4:].replace('_', ' ').title() for k in kpi_cols]
+                x = np.arange(len(names))
                 width = 0.35 if len(eval_dfs) > 1 else 0.7
-                
                 for i, (df, label, color) in enumerate(eval_dfs):
-                    kpi_means = df[kpi_cols].mean().values
-                    kpi_stds = df[kpi_cols].std().values
-                    
-                    # Plot bars with error bars
+                    means = df[kpi_cols].mean().values
+                    stds = df[kpi_cols].std().values
                     offset = width * (i - (len(eval_dfs)-1)/2)
-                    ax2.bar(x + offset, kpi_means, width, yerr=kpi_stds,
-                           label=label, color=color, alpha=0.7, capsize=5,
-                           error_kw=dict(elinewidth=1.5, ecolor='black', capthick=1.5))
-                    
-                    # Add value labels
-                    for j, v in enumerate(kpi_means):
-                        ax2.text(x[j] + offset, v + 0.1, f"{v:.2f}", 
-                               ha='center', va='bottom', fontsize=9)
-                
+                    ax2.bar(x + offset, means, width, yerr=stds, label=label, color=color, alpha=0.7, capsize=5)
                 ax2.set_xticks(x)
-                ax2.set_xticklabels(kpi_names, rotation=45, ha='right')
-                ax2.set_ylabel('KPI Value', fontsize=12)
-                ax2.legend(fontsize=10)
-                ax2.set_title('Key Performance Indicators', fontsize=14, pad=20)
-                ax2.grid(True, alpha=0.2, axis='y')
-        
-        plt.tight_layout()
-        
-        # Save the combined plot
-        plot_path = "training_results_combined.png"
-        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-        print(f"\nCombined training results plot saved to {os.path.abspath(plot_path)}")
-        
-        # Save individual plots
-        fig1, ax = plt.subplots(figsize=(14, 6))
-        for line in ax1.lines + ax1.collections:
-            if hasattr(line, 'get_label') and line.get_label():
-                if 'Start' in line.get_label() or 'End' in line.get_label():
-                    ax.scatter([], [], color=line.get_color(), label=line.get_label(), 
-                             marker='^' if 'Start' in line.get_label() else 'v', s=100)
-                else:
-                    ax.add_line(line)
-                    if isinstance(line, plt.Line2D):
-                        ax.fill_between(line.get_xdata(), 
-                                      line.get_ydata() - rolling_std, 
-                                      line.get_ydata() + rolling_std,
-                                      color=line.get_color(), alpha=0.15, linewidth=0)
-        
-        ax.set_title('Training Progress with Confidence Intervals', fontsize=14, pad=20)
-        ax.set_xlabel('Training Steps', fontsize=12)
-        ax.set_ylabel('Average Reward', fontsize=12)
-        ax.legend(loc='lower right', fontsize=10)
-        ax.grid(True, alpha=0.2)
-        plt.tight_layout()
-        plt.savefig("training_curves.png", dpi=300, bbox_inches='tight')
-        
-        print("\nVisualization complete!")
-        
+                ax2.set_xticklabels(names, rotation=45, ha='right')
+                ax2.set_ylabel('KPI Value')
+                ax2.set_title('Key Performance Indicators')
+                ax2.legend()
+                ax2.grid(True, axis='y')
+            fig2.tight_layout()
+            fig2.savefig('training_kpis.png', dpi=300, bbox_inches='tight')
+
+        fig.tight_layout()
+        fig.savefig('training_rewards.png', dpi=300, bbox_inches='tight')
+
     except ImportError as e:
-        print(f"Could not import required libraries for plotting: {e}")
+        print(f'Could not import required libraries for plotting: {e}')
     except Exception as e:
         import traceback
-        print(f"Error generating plots: {str(e)}\n{traceback.format_exc()}")
+        print(f'Error generating plots: {str(e)}\n{traceback.format_exc()}')
 
 def main_2kpi_training(num_buildings, timesteps_per_episode):
     """Trains a PPO agent focusing on 2 KPIs (comfort and emissions)."""
