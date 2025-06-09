@@ -43,10 +43,10 @@ PHASE_II = PhaseWeights(w1=0.3, w2=0.1, w3=0.3, w4=0.3)  # Phase II adds resilie
 # Updated with more realistic baseline values based on observed KPI values
 BASELINE_KPIS = {
     "carbon_emissions": 1500.0,        # Baseline for carbon emissions (kgCO2) - based on observed values ~1300-1500
-    "ramping": 4000.0,                 # Baseline for load ramping (kW) - based on observed values ~3500-4500
-    "1-load_factor": 0.45,             # Baseline for load factor (1 - actual_load_factor) - based on observed values ~0.4-0.48
-    "daily_peak": 90.0,                # Baseline for daily peak demand (kW) - based on observed values ~82-90
-    "all_time_peak": 100.0,            # Baseline for all-time peak demand (kW) - based on observed values ~90-98
+    "ramping": 200.0,                 # MODIFIED: Baseline for load ramping (kW) - based on observed values ~3500-4500, new target closer to good performance
+    "1-load_factor": 0.10,             # MODIFIED: Baseline for load factor (1 - actual_load_factor) - based on observed values ~0.4-0.48, new target closer to good performance
+    "daily_peak": 20.0,                # MODIFIED: Baseline for daily peak demand (kW) - based on observed values ~82-90, new target closer to good performance
+    "all_time_peak": 25.0,            # MODIFIED: Baseline for all-time peak demand (kW) - based on observed values ~90-98, new target closer to good performance
     "unmet_hours": 0.4,                # Baseline for thermal comfort violations (hours) - based on observed values ~0.37-0.44
     "1-thermal_resilience": 0.04,      # Baseline for thermal resilience during outages - based on observed values ~0.02-0.06
     "normalized_unserved_energy": 0.15, # Baseline for unserved energy during outages (kWh) - based on observed values ~0.12-0.18

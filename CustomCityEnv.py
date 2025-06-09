@@ -270,25 +270,25 @@ class CustomCityEnv(gym.Env):
                 base_reward = float(self.reward_calculator.score(raw_kpis))
                 
                 # Enhanced reward shaping with better scaling and shaping
-                reward_components = {
-                    'comfort': 0.5 * comfort_score,
-                    'emissions': 0.4 * emissions_score,
-                    'ramping': 0.05 * (1.0 - min(1.0, ramping / 50.0)),
-                    'load_factor': 0.05 * load_factor,
-                    'peaks': 0.05 * (1.0 - min(1.0, peaks / 100.0))
-                }
+                # MODIFIED: reward_components = {
+                # MODIFIED: 'comfort': 0.5 * comfort_score,
+                # MODIFIED: 'emissions': 0.4 * emissions_score,
+                # MODIFIED: 'ramping': 0.05 * (1.0 - min(1.0, ramping / 50.0)),
+                # MODIFIED: 'load_factor': 0.05 * load_factor,
+                # MODIFIED: 'peaks': 0.05 * (1.0 - min(1.0, peaks / 100.0))
+                # MODIFIED: }
                 
                 # Calculate base reward
-                reward = sum(reward_components.values())
+                reward = base_reward # MODIFIED: Use score from AICrowdControl
                 
                 # Add shaped rewards for better learning
                 # 1. Bonus for maintaining comfort
                 if comfort_score > 0.95:
-                    reward += 0.5
+                    reward += 0.05 # MODIFIED: Bonus reduced
                     
                 # 2. Bonus for low emissions
                 if emissions_score > 0.9:
-                    reward += 0.5
+                    reward += 0.05 # MODIFIED: Bonus reduced
                     
                 # 3. Penalize extreme actions (encourage smoother control)
                 if hasattr(self, 'last_action') and action is not None:
