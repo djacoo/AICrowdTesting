@@ -11,6 +11,8 @@ Evaluation results and trained models are saved for each phase.
 TensorBoard logging is enabled for monitoring training progress.
 """
 import os
+import shutil
+import glob
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,6 +20,30 @@ import torch  # For neural network operations
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.callbacks import EvalCallback
+
+# Clean up previous training artifacts
+def cleanup_previous_runs():
+    """Remove previous model files and logs to ensure a fresh start."""
+    # Remove model files
+    for model_file in glob.glob('ppo_*_model*') + glob.glob('models/ppo_*_model*'):
+        try:
+            if os.path.isfile(model_file):
+                os.remove(model_file)
+            elif os.path.isdir(model_file):
+                shutil.rmtree(model_file)
+        except Exception as e:
+            print(f"Warning: Could not remove {model_file}: {e}")
+    
+    # Remove tensorboard logs
+    for log_dir in ['ppo_tensorboard_logs_2kpi', 'ppo_tensorboard_logs_multi_kpi']:
+        try:
+            if os.path.exists(log_dir):
+                shutil.rmtree(log_dir)
+        except Exception as e:
+            print(f"Warning: Could not remove {log_dir}: {e}")
+
+# Run cleanup at the start
+cleanup_previous_runs()
 
 # Assuming AICrowdControl.py and CustomCityEnv.py are in the same directory or PYTHONPATH
 from AICrowdControl import PhaseWeights, BASELINE_KPIS # BASELINE_KPIS is used by CustomCityEnv
@@ -77,9 +103,16 @@ def plot_training_results(window_size=25):
                 events = acc.Scalars('rollout/ep_rew_mean')
                 steps = [e.step for e in events]
                 rewards = [e.value for e in events]
-                histories.append(pd.Series(rewards, index=steps))
+                series = pd.Series(rewards, index=steps)
+                # Reset index to avoid duplicate indices when concatenating
+                series = series[~series.index.duplicated(keep='first')]
+                if not series.empty:
+                    histories.append(series)
             if histories:
-                return pd.concat(histories, axis=1)
+                # Ensure all series have the same index before concatenation
+                result = pd.concat(histories, axis=1, join='outer')
+                # Forward fill any missing values that might have been introduced
+                return result.ffill().bfill()
             return None
 
         # Load reward histories
@@ -174,29 +207,29 @@ def main_2kpi_training(num_buildings, timesteps_per_episode):
     
     # Initialize PPO agent with enhanced configuration for 2-KPI training
     policy_kwargs = {
-        'net_arch': dict(pi=[256, 256], vf=[256, 256]),
-        'activation_fn': torch.nn.Tanh,
+        'net_arch': dict(pi=[512, 512, 256], vf=[512, 512, 256]),  # Deeper network
+        'activation_fn': torch.nn.ReLU,  # ReLU for deeper networks
         'ortho_init': True,
-        'log_std_init': -1.0,  # Adjusted for better exploration
+        'log_std_init': -0.5,  # Slightly higher initial std for better exploration
         'optimizer_kwargs': {
-            'eps': 1e-5,  # For numerical stability
-            'weight_decay': 0.0  # Disabled for now to prevent interference
+            'eps': 1e-8,  # Increased numerical stability
+            'weight_decay': 1e-6  # Small weight decay for better generalization
         }
     }
     
     # Learning rate schedule with warmup and cosine decay
     def lr_schedule(progress_remaining):
-        """Cosine decay with warmup for learning rate"""
-        # Linear warmup for first 10% of training
-        warmup_frac = 0.1
+        """Cosine decay with warmup for learning rate with longer warmup"""
+        # Linear warmup for first 20% of training
+        warmup_frac = 0.2
         if progress_remaining > 1.0 - warmup_frac:
             warmup_progress = (1.0 - progress_remaining) / warmup_frac
-            return 3e-4 * warmup_progress
+            return 5e-4 * warmup_progress  # Higher initial learning rate
             
         # Cosine decay for the rest
         progress = (1.0 - progress_remaining - warmup_frac) / (1.0 - warmup_frac)
         min_lr = 1e-5
-        max_lr = 3e-4
+        max_lr = 5e-4  # Higher max learning rate
         return min_lr + 0.5 * (max_lr - min_lr) * (1 + np.cos(np.pi * progress))
     
     # Initialize the model with optimized hyperparameters
@@ -204,25 +237,24 @@ def main_2kpi_training(num_buildings, timesteps_per_episode):
         "MlpPolicy",
         env_2kpi,
         learning_rate=lr_schedule,
-        n_steps=2048,           # Number of steps to run for each environment per update
-        batch_size=256,         # Minibatch size for each epoch
-        n_epochs=8,             # Number of epochs for optimization
-        gamma=0.99,             # Discount factor
-        gae_lambda=0.95,        # Factor for trade-off of bias vs variance for GAE
-        clip_range=0.2,         # Clipping parameter for the policy
-        clip_range_vf=None,     # Clipping parameter for the value function
-        ent_coef=0.01,          # Entropy coefficient for exploration
-        vf_coef=0.5,            # Value function coefficient for the loss
-        max_grad_norm=0.5,      # Maximum gradient norm for gradient clipping
-        use_sde=False,          # Whether to use State Dependent Exploration
-        sde_sample_freq=-1,     # Sample a new noise matrix every n steps when using gSDE
-        target_kl=0.02,         # Target KL divergence threshold
+        n_steps=4096,           # More steps per update for better gradient estimates
+        batch_size=512,         # Larger batch size for more stable updates
+        n_epochs=10,            # More epochs for better optimization
+        gamma=0.995,            # Slightly higher discount factor for longer-term rewards
+        gae_lambda=0.97,        # Adjusted for better bias-variance tradeoff
+        clip_range=0.2,         # Slightly higher clip range for more exploration
+        clip_range_vf=0.2,      # Add clipping for value function
+        ent_coef=0.02,          # Slightly higher entropy for better exploration
+        vf_coef=0.7,            # Higher weight on value function loss
+        max_grad_norm=0.8,      # Increased gradient clipping for stability
+        use_sde=False,          # Disable SDE for discrete action spaces
+        target_kl=0.03,         # Slightly higher KL threshold
         tensorboard_log=TENSORBOARD_LOG_PATH_2KPI_BASE,
         policy_kwargs=policy_kwargs,
-        verbose=1,              # Verbosity level
-        device='auto',          # Device to run on (auto, cpu, cuda, etc.)
-        normalize_advantage=True,  # Whether to normalize the advantage
-        seed=42                  # For reproducibility
+        verbose=2,              # More detailed logging
+        device='auto',
+        normalize_advantage=True,
+        seed=42
     )
 
     print(f"Starting 2-KPI training for {TOTAL_TIMESTEPS_2KPI} timesteps...")
@@ -337,12 +369,6 @@ def main_multi_kpi_training(num_buildings, timesteps_per_episode):
     path_to_2kpi_model = MODEL_SAVE_PATH_2KPI_BASE + ".zip"
     print(f"Loading policy from 2-KPI model: {path_to_2kpi_model}")
 
-    # Check if the 2-KPI model exists before trying to load its policy
-    if not os.path.exists(path_to_2kpi_model):
-        print(f"Error: 2-KPI model not found at {path_to_2kpi_model}. Skipping Multi-KPI training.")
-        env_multi_kpi.close()
-        return
-
     # First create the environment to get the correct observation space
     print(f"Setting up environment to get observation space...")
     temp_env = CustomCityEnv(
@@ -353,61 +379,56 @@ def main_multi_kpi_training(num_buildings, timesteps_per_episode):
     obs_shape = temp_env.observation_space.shape[0]
     temp_env.close()
     
-    # Create a new model with the correct observation space
-    print("Instantiating new PPO agent for Multi-KPI training "
-          f"(TensorBoard logs: {TENSORBOARD_LOG_PATH_MULTI_BASE}/)...")
-    
     # Initialize PPO agent with enhanced configuration for multi-KPI training
     policy_kwargs = {
-        'net_arch': dict(pi=[512, 512], vf=[512, 512]),  # Larger network for more complex task
-        'activation_fn': torch.nn.ReLU,  # ReLU for potentially better gradient flow
+        'net_arch': dict(pi=[512, 512, 256], vf=[512, 512, 256]),  # Deeper network
+        'activation_fn': torch.nn.ReLU,  # ReLU for deeper networks
         'ortho_init': True,
-        'log_std_init': -0.8,  # Balanced exploration/exploitation
+        'log_std_init': -0.5,  # Slightly higher initial std for better exploration
         'optimizer_kwargs': {
-            'eps': 1e-5,  # For numerical stability
-            'weight_decay': 0.0  # No weight decay for stability
+            'eps': 1e-8,  # Increased numerical stability
+            'weight_decay': 1e-6  # Small weight decay for better generalization
         }
     }
     
     # Learning rate schedule with warmup and cosine decay for multi-KPI
     def lr_schedule(progress_remaining):
-        """Cosine decay with warmup for learning rate"""
-        # Linear warmup for first 15% of training (longer warmup for more complex task)
-        warmup_frac = 0.15
+        """Cosine decay with warmup for learning rate with longer warmup"""
+        # Linear warmup for first 20% of training
+        warmup_frac = 0.2
         if progress_remaining > 1.0 - warmup_frac:
             warmup_progress = (1.0 - progress_remaining) / warmup_frac
-            return 2.5e-4 * warmup_progress
+            return 4e-4 * warmup_progress  # Slightly lower initial learning rate than 2-KPI
             
         # Cosine decay for the rest
         progress = (1.0 - progress_remaining - warmup_frac) / (1.0 - warmup_frac)
-        min_lr = 5e-6  # Lower minimum learning rate for fine-tuning
-        max_lr = 2.5e-4
+        min_lr = 5e-6  # Slightly lower minimum learning rate for fine-tuning
+        max_lr = 4e-4
         return min_lr + 0.5 * (max_lr - min_lr) * (1 + np.cos(np.pi * progress))
     
+    # Initialize the model with optimized hyperparameters for multi-KPI training
     model_multi_kpi = PPO(
         "MlpPolicy",
         env_multi_kpi,
         learning_rate=lr_schedule,
-        n_steps=4096,           # More steps per update for better advantage estimation
-        batch_size=1024,        # Larger batch size for stability
-        n_epochs=10,            # More epochs for better learning
-        gamma=0.99,             # Standard discount factor
-        gae_lambda=0.95,        # Standard GAE parameter for good bias-variance tradeoff
-        clip_range=0.15,        # Slightly lower clip range for more stable updates
-        clip_range_vf=None,     # No separate clip range for value function
-        ent_coef=0.01,          # Lower entropy for more exploitation
-        vf_coef=0.5,            # Standard value function coefficient
-        max_grad_norm=0.5,      # Conservative gradient clipping
-        use_sde=False,          # No state-dependent exploration
-        sde_sample_freq=-1,     # Disabled
-        target_kl=0.01,         # Tighter KL constraint for stable updates
+        n_steps=4096,           # More steps per update for better gradient estimates
+        batch_size=512,         # Larger batch size for more stable updates
+        n_epochs=12,            # More epochs for better optimization
+        gamma=0.995,            # Slightly higher discount factor for longer-term rewards
+        gae_lambda=0.97,        # Adjusted for better bias-variance tradeoff
+        clip_range=0.18,        # Slightly higher clip range for more exploration
+        clip_range_vf=0.18,     # Add clipping for value function
+        ent_coef=0.015,         # Slightly lower entropy for more focused learning
+        vf_coef=0.8,            # Higher weight on value function loss
+        max_grad_norm=0.8,      # Increased gradient clipping for stability
+        use_sde=False,          # Disable SDE for discrete action spaces
+        target_kl=0.03,         # Slightly higher KL threshold
         tensorboard_log=TENSORBOARD_LOG_PATH_MULTI_BASE,
-        policy_kwargs=policy_kwargs,  # Use the policy_kwargs defined above
-        verbose=1,              # Verbosity level
-        device='auto',          # Device to run on (auto, cpu, cuda, etc.)
-        normalize_advantage=True,  # Normalize advantages
-        seed=42,                # For reproducibility
-        _init_setup_model=True  # Initialize model immediately
+        policy_kwargs=policy_kwargs,
+        verbose=2,              # More detailed logging
+        device='auto',
+        normalize_advantage=True,
+        seed=42
     )
     
     # Load the 2-KPI model if it exists
@@ -426,6 +447,8 @@ def main_multi_kpi_training(num_buildings, timesteps_per_episode):
             print("Starting training from scratch")
     else:
         print("2-KPI model not found, starting training from scratch")
+    
+
 
     # --- Agent Training (Multi-KPIs) ---
     print(f"Starting Multi-KPI training for {TOTAL_TIMESTEPS_MULTI} timesteps...")
