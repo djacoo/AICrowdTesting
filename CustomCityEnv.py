@@ -141,94 +141,31 @@ class CustomCityEnv(gym.Env):
         if self.episode_data is None:
             raise Exception("Must call reset() before step()")
 
-        # Get the current observation before updating the timestep
-        obs = self._get_observation()
-        
-        # Convert action to integer if it's a numpy array
-        action_int = int(action) if isinstance(action, (np.ndarray, np.generic)) else action
-        
-        # Calculate reward based on the current action and state
-        # Action 0: Low consumption (good) -> higher reward
-        # Action 1: Medium consumption (neutral) -> medium reward
-        # Action 2: High consumption (bad) -> lower reward
-        action_penalties = {0: -0.2, 1: -0.5, 2: -1.0}  # Penalties for each action
-        
-        # Get the current energy consumption for this timestep
-        current_energy = np.sum(self.episode_data['e'][self.current_timestep])
-        
-        # Calculate reward based on action and energy consumption
-        # We want to minimize both the action penalty and the energy consumption
-        reward = -action_penalties[action_int] - (current_energy * 0.01)  # Scale down energy term to reasonable range
-        
-        # Move to the next timestep
+        # action parameter is part of the gym API. It's not used in this specific
+        # step logic as episode data is pre-generated at reset.
+        # The learning algorithm uses it to associate states with chosen actions.
+
         self.current_timestep += 1
-        
-        # Check if the episode is done
-        done = self.current_timestep >= self.timesteps_per_episode
-        
-        # Info dictionary (can be empty)
-        info = {}
-        
-        # Get the next observation (or the same one if done)
-        next_obs = self._get_observation() if not done else None
-        
-        return next_obs, reward, done, info
-        #
-        # This means the current environment structure is more like a "contextual bandit"
-        # for the whole episode if action in `reset` sets the context, or the action in `step`
-        # doesn't influence the state dynamics within an episode.
-        #
-        # For a true RL step, `generate_dummy_environment_data` should be callable per step,
-        # or the environment should manage its own state dynamics.
-
-        # Let's make a practical simplification for this step:
-        # The environment will use the episode data generated at `reset()`.
-        # The `action` taken in `step()` will be conceptually logged or used, but it won't
-        # change the pre-generated `self.episode_data` for the current timestep.
-        # The agent will still learn a policy to take actions given states, and the reward
-        # will be calculated based on the state. This is a common setup for evaluating fixed policies
-        # or when the environment dynamics are not fully controllable at each step by the agent.
-        # The "convergence" will be about finding an optimal sequence of these limited actions.
-
-        # Construct environment_data for the *current single timestep* for KPI calculation
-        # Most KPI functions in AICrowdControl expect full arrays, but some could be adapted.
-        # For now, `get_all_kpi_values` expects the full episode data.
-        # This is a mismatch with typical per-step reward in RL.
-        #
-        # Resolution: The reward in CityLearn is often calculated at the end of an episode,
-        # or based on cumulative KPIs over an episode. Let's assume the reward is per episode.
-        # So, `step` advances time, but the reward is only meaningful at `done=True`.
-
         done = False
-        reward = 0 # Intermediate steps get 0 reward
-        raw_kpis = {} # Initialize raw_kpis
+        reward = 0.0  # Default reward for intermediate steps
+        info = {}
 
-        self.current_timestep += 1
         if self.current_timestep >= self.timesteps_per_episode:
             done = True
-            # Calculate KPIs and score for the whole episode
             try:
-                # The AICrowdControl class expects the *entire episode's data* for KPI calculation.
                 raw_kpis = self.reward_calculator.get_all_kpi_values(self.episode_data)
-                reward = self.reward_calculator.score(raw_kpis)
-                # print(f"Episode finished. Raw KPIs: {raw_kpis}, Reward: {reward}") # For debugging
+                reward = float(self.reward_calculator.score(raw_kpis)) # Ensure reward is float
+                info = {'episode_kpis': raw_kpis}
             except Exception as e:
                 print(f"Error calculating KPIs/reward at end of episode: {e}")
-                reward = -1 # Penalize if KPI calculation fails
+                reward = -1.0 # Penalize if KPI calculation fails, ensure float
+                info = {'error': str(e)}
 
-            info = {'episode_kpis': raw_kpis}
+            observation = np.zeros(self.observation_space.shape, dtype=np.float32)
         else:
-            info = {}
+            observation = self._get_observation() # Fetches observation for s_{t+1}
 
-        observation = self._get_observation() if not done else np.zeros(self.observation_space.shape, dtype=np.float32)
-
-        # Gymnasium step returns obs, reward, terminated, truncated, info
-        # For this env, 'terminated' is when episode ends naturally (done=True)
-        # 'truncated' could be True if a time limit is hit unrelated to task goal (not used here, so False)
-        terminated = done
-        truncated = False # No specific truncation condition implemented apart from episode end
-
-        return observation, reward, terminated, truncated, info
+        return observation, reward, done, info
 
     def render(self, mode='human'):
         # For now, no complex rendering
@@ -242,30 +179,29 @@ if __name__ == '__main__':
     print("Testing CustomCityEnv...")
     phase_weights = PhaseWeights(w1=0.5, w2=0.5, w3=0.0, w4=0.0) # Comfort and Emissions
     env = CustomCityEnv(phase_weights=phase_weights, num_buildings=2, timesteps_per_episode=24*1) # 1 day episode
-
-    obs, info = env.reset(seed=42) # Pass a seed for reproducibility in testing
+    env.seed(42) # Set seed for reproducibility
+    obs = env.reset()
     print("Initial Observation Shape:", obs.shape)
     print("Initial Observation:", obs)
-    print("Initial Info:", info)
+    # print("Initial Info:", info) # Info is not returned by reset in gym 0.21.0
 
-    terminated = False
-    truncated = False
+    done = False
     total_reward = 0
     step_count = 0
-    while not (terminated or truncated):
+    while not done:
         action = env.action_space.sample() # Random action
-        obs, reward, terminated, truncated, info = env.step(action)
+        obs, reward, done, info = env.step(action) # Use 'done'
         total_reward += reward # Accumulate reward (though it's only non-zero at the end)
         step_count += 1
-        if terminated or truncated:
-            print(f"Episode finished after {step_count} steps. Terminated: {terminated}, Truncated: {truncated}")
+        if done: # Check 'done'
+            print(f"Episode finished after {step_count} steps. Done: {done}")
             print(f"Final Reward: {reward}") # This is the episode reward
             if 'episode_kpis' in info:
                 print("Episode KPIs:")
                 for k, v in info['episode_kpis'].items():
                     print(f"  {k}: {v:.4f}")
         # else:
-            # print(f"Step {step_count}, Action: {action}, Obs: {obs[:3]}..., Reward: {reward}, Terminated: {terminated}, Truncated: {truncated}")
+            # print(f"Step {step_count}, Action: {action}, Obs: {obs[:3]}..., Reward: {reward}, Done: {done}")
 
 
     print("Environment test complete.")
