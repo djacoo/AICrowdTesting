@@ -78,6 +78,8 @@ class CustomCityEnv(gym.Env):
         self.num_buildings = num_buildings
         self.timesteps_per_episode = timesteps_per_episode
         self.current_timestep = 0
+        self.current_step = 0  # Initialize current_step
+        self.episode_length = timesteps_per_episode  # Initialize episode_length
 
         self.reward_calculator = ControlTrackReward(baseline=BASELINE_KPIS, phase=phase_weights)
 
@@ -175,6 +177,7 @@ class CustomCityEnv(gym.Env):
 
     def reset(self):
         self.current_timestep = 0
+        self.current_step = 0  # Reset current_step
         # Initialize or clear action history
         self.action_history = []
         
@@ -249,8 +252,9 @@ class CustomCityEnv(gym.Env):
                     self.episode_data['e'][self.current_timestep]
                 )
 
-        # Increment timestep and check if episode is done
+        # Increment timestep and step counter
         self.current_timestep += 1
+        self.current_step += 1  # Increment current_step
         done = self.current_timestep >= self.timesteps_per_episode
         info = {}
         
@@ -270,82 +274,71 @@ class CustomCityEnv(gym.Env):
                 peaks = raw_kpis.get('peaks', 0)
                 resilience = raw_kpis.get('resilience', 0)
                 
-                # Calculate individual scores (0-1 range, higher is better)
-                comfort_score = 1.0 - min(1.0, unmet_hours)
-                emissions_score = np.exp(-emissions / 500.0)  # Exponential scaling
+                # 1. Enhanced base scores with better scaling
+                comfort_norm = 1.0 - min(1.0, unmet_hours)
                 
-                # Calculate base reward from all KPIs
-                base_reward = float(self.reward_calculator.score(raw_kpis))
+                # 2. Improved scoring with dynamic scaling
+                # Comfort score - smoother gradient with square root
+                comfort_score = np.sqrt(comfort_norm)  # Softer gradient for better learning
                 
-                # Enhanced reward shaping with better scaling and shaping
-                # MODIFIED: reward_components = {
-                # MODIFIED: 'comfort': 0.5 * comfort_score,
-                # MODIFIED: 'emissions': 0.4 * emissions_score,
-                # MODIFIED: 'ramping': 0.05 * (1.0 - min(1.0, ramping / 50.0)),
-                # MODIFIED: 'load_factor': 0.05 * load_factor,
-                # MODIFIED: 'peaks': 0.05 * (1.0 - min(1.0, peaks / 100.0))
-                # MODIFIED: }
+                # Emissions score - more aggressive log scaling
+                emissions_norm = 1.0 / (1.0 + np.log1p(emissions / 30.0))  # More sensitive to emissions
+                emissions_score = 1.8 / (1.0 + np.exp(-4.0 * (emissions_norm - 0.6)))  # Steeper sigmoid
                 
-                # Enhanced reward shaping with clearer learning signals and curriculum
+                # 3. Dynamic progress-based scaling
+                progress = min(1.0, self.current_step / self.episode_length)
+                # More aggressive exploration early, tighter later
+                progress_factor = 0.6 + 0.8 * (1.0 - np.exp(-3.0 * progress))  # Smoother progression
                 
-                # 1. Base reward with adaptive scaling
-                reward = 10.0 * base_reward  # Slightly reduced base scaling
+                # 4. Enhanced base reward with stronger weighting on comfort
+                temperature = 0.6 + 0.4 * progress  # More aggressive temperature scaling
+                base_reward = 120.0 * (
+                    (0.7 * comfort_score + 0.3 * emissions_score) ** (1.0/max(0.1, temperature))
+                )
                 
-                # 2. Comfort component (sharper distinction with adaptive thresholds)
+                # 5. More aggressive performance bonuses with progressive thresholds
                 comfort_bonus = 0.0
-                if comfort_score > 0.9:
-                    comfort_bonus = 15.0 * (comfort_score - 0.9)  # Strong reward for good comfort
-                elif comfort_score < 0.7:
-                    comfort_bonus = -7.5 * (0.7 - comfort_score)  # Penalty for poor comfort
+                comfort_threshold = 0.6 + 0.3 * progress  # More gradual threshold increase
+                if comfort_score > comfort_threshold:
+                    comfort_bonus = 50.0 * ((comfort_score - comfort_threshold) ** 1.5)  # Stronger bonus
                 
-                # 3. Emissions component (progressive rewards/penalties with adaptive thresholds)
                 emissions_bonus = 0.0
-                if emissions_score > 0.85:
-                    emissions_bonus = 10.0 * (emissions_score - 0.85)  # Strong reward for good emissions
-                elif emissions_score < 0.4:
-                    emissions_bonus = -5.0 * (0.4 - emissions_score)  # Penalty for high emissions
+                emissions_threshold = 0.65 + 0.25 * progress  # More accessible threshold
+                if emissions_score > emissions_threshold:
+                    emissions_bonus = 40.0 * ((emissions_score - emissions_threshold) ** 1.5)  # Stronger bonus
                 
-                # 4. Action consistency (adaptive penalties based on progress)
-                action_penalty = 0.0
-                if hasattr(self, 'last_action') and action is not None and len(self.action_history) > 0:
-                    # Normalized action change (0-1 range)
-                    action_change = abs(action - self.last_action) / 4.0
-                    
-                    # Progress-based penalty scaling
-                    progress = self.current_timestep / self.timesteps_per_episode
-                    penalty_scale = 1.0 + (2.0 * progress)  # Increase penalty as episode progresses
-                    
-                    # Quadratic penalty for large changes
-                    action_penalty = penalty_scale * 1.5 * (action_change ** 2)
-                    
-                    # Detect and penalize oscillation patterns
-                    if len(self.action_history) > 2:
-                        # Check for back-and-forth between actions
-                        if (action == self.action_history[-2] and 
-                            abs(action - self.last_action) > 2):
-                            action_penalty += 2.0
+                # 6. Progress-based rewards with increasing impact
+                progress_bonus = 10.0 * (progress ** 1.5)  # More aggressive progress reward
                 
-                # 5. Progress bonus (increases non-linearly with progress)
-                progress = self.current_timestep / self.timesteps_per_episode
-                progress_bonus = 2.0 * (progress ** 1.5)  # Slightly faster increase
-                
-                # 6. Terminal reward for completing the episode successfully
+                # 7. Enhanced terminal bonus for good performance
                 terminal_bonus = 0.0
-                if done and progress >= 0.95:  # Only give bonus if episode completes
-                    # Scale terminal bonus with performance
-                    performance = (comfort_score + emissions_score) / 2.0
-                    terminal_bonus = 15.0 * (performance ** 2)  # Quadratic scaling
+                if done and progress >= 0.9:  # Slightly lower threshold
+                    performance = (0.65 * comfort_score + 0.35 * emissions_score)  # Slight preference for comfort
+                    if performance > 0.8:  # Lower threshold for terminal bonus
+                        terminal_bonus = 80.0 * (performance ** 2.5)  # Much stronger terminal bonus
                 
-                # Combine all components with weighted sum
-                reward = (reward + 
-                        comfort_bonus + 
-                        emissions_bonus - 
-                        action_penalty + 
-                        progress_bonus +
-                        terminal_bonus)
+                # 8. Action consistency (slightly higher penalty for erratic behavior)
+                action_penalty = 0.0
+                if hasattr(self, 'last_action') and action is not None and hasattr(self, 'action_history') and len(self.action_history) > 0:
+                    action_change = abs(action - self.last_action) / 4.0
+                    action_penalty = 2.0 * (action_change ** 1.5)
                 
-                # Scale and clip the final reward with asymmetric bounds
-                reward = np.clip(reward, -15.0, 25.0)  # Wider range with stronger penalties
+                # 9. Combine all components with weights
+                reward = (
+                    base_reward * 0.7 +  # Base reward is most important
+                    comfort_bonus * 0.5 +
+                    emissions_bonus * 0.5 +
+                    progress_bonus * 0.3 +
+                    terminal_bonus * 0.5 -
+                    action_penalty
+                )
+                
+                # 10. Dynamic reward scaling based on progress (less aggressive)
+                reward_scale = 1.0 + (0.5 * progress)
+                reward *= reward_scale
+                
+                # 11. Clip to reasonable range
+                reward = np.clip(reward, -50.0, 200.0)  # Lower ceiling, higher floor for penalties
                 
                 # Store detailed info for analysis
                 info = {

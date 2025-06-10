@@ -35,6 +35,17 @@ from stable_baselines3.common.monitor import Monitor
 
 # Import callbacks from stable_baselines3
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
+from stable_baselines3.common.utils import get_schedule_fn
+
+class LinearSchedule:
+    """Linear schedule for learning rate decay."""
+    def __init__(self, initial_p, final_p, total_timesteps):
+        self.initial_p = initial_p
+        self.final_p = final_p
+        self.total_timesteps = total_timesteps
+
+    def __call__(self, progress_remaining: float):
+        return self.final_p + (self.initial_p - self.final_p) * progress_remaining
 
 # ===== Utility Functions =====
 
@@ -173,58 +184,70 @@ def plot_training_results(window_size=25):
         import matplotlib.pyplot as plt
         import numpy as np
         from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+        from pathlib import Path
 
         def load_rewards(log_base):
             """
-            Load reward history from all runs under a directory.
+            Load reward history from TensorBoard event files.
             
             Args:
                 log_base (str): Base path for the log directory.
             
             Returns:
-                pd.DataFrame: Reward history.
+                pd.DataFrame: Reward history with timesteps as index.
             """
             try:
-                runs = [d for d in glob.glob(os.path.join(log_base, '*')) if os.path.isdir(d)]
-                if not runs:
-                    runs = [log_base]
-                histories = []
-                for run in runs:
-                    event_files = glob.glob(os.path.join(run, 'events.out.tfevents.*'))
-                    if not event_files:
-                        continue
-                    event_file = max(event_files, key=os.path.getmtime)
-                    acc = EventAccumulator(run)
-                    acc.Reload()
-                    if 'rollout/ep_rew_mean' not in acc.Tags()['scalars']:
-                        continue
-                    events = acc.Scalars('rollout/ep_rew_mean')
-                    steps = [e.step for e in events]
-                    rewards = [e.value for e in events]
-                    series = pd.Series(rewards, index=steps)
-                    # Reset index to avoid duplicate indices when concatenating
-                    series = series[~series.index.duplicated(keep='first')]
-                    if not series.empty:
-                        histories.append(series)
-                if histories:
-                    # Ensure all series have the same index before concatenation
-                    result = pd.concat(histories, axis=1, join='outer')
-                    # Forward fill any missing values that might have been introduced
-                    return result.ffill().bfill()
+                # Find all event files in the directory
+                event_files = list(Path(log_base).rglob('events.out.tfevents.*'))
+                if not event_files:
+                    print(f"No event files found in {log_base}")
+                    return None
+                    
+                # Sort by modification time to get the most recent
+                event_file = max(event_files, key=lambda x: x.stat().st_mtime)
+                print(f"Loading events from: {event_file}")
+                
+                # Load the event file
+                acc = EventAccumulator(str(event_file.parent))
+                acc.Reload()
+                
+                # Check if the required tag exists
+                if 'rollout/ep_rew_mean' not in acc.Tags()['scalars']:
+                    print(f"'rollout/ep_rew_mean' not found in {event_file}")
+                    print(f"Available tags: {acc.Tags()}")
+                    return None
+                
+                # Get the reward data
+                events = acc.Scalars('rollout/ep_rew_mean')
+                if not events:
+                    print("No reward data found in event file")
+                    return None
+                    
+                # Create a DataFrame with the reward data
+                steps = [e.step for e in events]
+                rewards = [e.value for e in events]
+                df = pd.DataFrame({'step': steps, 'reward': rewards})
+                df = df.set_index('step')
+                
+                print(f"Loaded {len(df)} reward entries")
+                return df
+                
             except Exception as e:
-                print(f"Error loading rewards from {log_base}: {e}")
-            return None
+                print(f"Error loading rewards from {log_base}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                return None
 
         # Load reward histories
         print("Loading training histories...")
         history_2kpi = load_rewards(TENSORBOARD_LOG_PATH_2KPI_BASE)
         history_multi = load_rewards(TENSORBOARD_LOG_PATH_MULTI_BASE)
-
+        
         # Create figure for training curves
         print("Generating training curves...")
-        fig, ax1 = plt.subplots(1, 1, figsize=(10, 5))
-
-        # Plot training curves
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        # Plot each training phase
         for df, label, color in [
             (history_2kpi, '2-KPI Training', 'green'),
             (history_multi, 'Multi-KPI Training', 'orange')
@@ -234,71 +257,191 @@ def plot_training_results(window_size=25):
                 continue
                 
             try:
-                df.columns = [f'Run {i+1}' for i in range(df.shape[1])]
-                mean = df.mean(axis=1)
-                std = df.std(axis=1)
-                smoothed = mean.rolling(window=window_size, min_periods=1).mean()
-
-                ax1.plot(smoothed, linewidth=2, label=label, color=color)
-                ax1.fill_between(mean.index, mean - std, mean + std, color=color, alpha=0.1, label=f'{label} ±1 std')
+                # Ensure we have a DataFrame with numeric data
+                df = df.apply(pd.to_numeric, errors='coerce')
+                if 'reward' not in df.columns:
+                    print(f"'reward' column not found in {label} data")
+                    continue
+                
+                # Calculate rolling mean and std
+                window = min(window_size, len(df) // 4)  # Ensure window is not too large
+                if window < 1:
+                    window = 1
+                
+                df['smoothed'] = df['reward'].rolling(window=window, min_periods=1, center=True).mean()
+                df['std'] = df['reward'].rolling(window=window, min_periods=1, center=True).std().fillna(0)
+                
+                # Plot the smoothed line
+                ax.plot(df.index, df['smoothed'], 
+                       label=f'{label} (smoothed)', 
+                       color=color,
+                       linewidth=2)
+                
+                # Plot the standard deviation
+                ax.fill_between(df.index, 
+                              df['smoothed'] - df['std'], 
+                              df['smoothed'] + df['std'],
+                              color=color, 
+                              alpha=0.2,
+                              label=f'{label} ±1 std' if label == '2-KPI Training' else "_")
+                
+                print(f"Plotted {label} with {len(df)} data points")
+                
             except Exception as e:
-                print(f"Error plotting {label}: {e}")
-
-        ax1.set_title('Training Reward')
-        ax1.set_xlabel('Step')
-        ax1.set_ylabel('Reward')
-        ax1.legend()
-        ax1.grid(True)
-
-        # Save training curves plot
-        os.makedirs('plots', exist_ok=True)
+                print(f"Error plotting {label}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+        
+        # Customize the plot
+        ax.set_title('Training Progress', fontsize=14, pad=20)
+        ax.set_xlabel('Training Steps', fontsize=12)
+        ax.set_ylabel('Average Episode Reward', fontsize=12)
+        ax.legend(loc='lower right')
+        ax.grid(True, alpha=0.3)
+        
+        # Adjust layout and save
         plt.tight_layout()
-        plt.savefig('plots/training_curves.png')
-        plt.close(fig)
+        
+        # Ensure plots directory exists
+        os.makedirs('plots', exist_ok=True)
+        
+        # Save the figure
+        plot_path = os.path.join('plots', 'training_curves.png')
+        plt.savefig(plot_path, dpi=120, bbox_inches='tight')
+        print(f"\nTraining curves saved to: {os.path.abspath(plot_path)}")
+        
+        # Show the plot if in interactive mode
+        if 'IPython' in sys.modules:
+            plt.show()
+        else:
+            plt.close(fig)
 
         # --- KPI Metrics ---
-        print("Processing KPI metrics...")
-        eval_dfs = []
-        for csv_file, label, color in [
-            (EVAL_RESULTS_CSV_2KPI, '2-KPI Eval', 'green'),
-            (EVAL_RESULTS_CSV_MULTI, 'Multi-KPI Eval', 'orange')
-        ]:
-            if os.path.exists(csv_file):
+        print("\nProcessing KPI metrics...")
+        
+        # Check if we have any data to plot
+        if history_2kpi is None and history_multi is None:
+            print("No training data available for KPI metrics.")
+            return
+            
+        # Define KPIs to plot with their display properties
+        kpi_configs = [
+            {'id': 'comfort', 'title': 'Comfort Score', 'color': '#1f77b4'},
+            {'id': 'emissions', 'title': 'Emissions Score', 'color': '#ff7f0e'},
+            {'id': 'grid_impact', 'title': 'Grid Impact Score', 'color': '#2ca02c'},
+            {'id': 'resilience', 'title': 'Resilience Score', 'color': '#d62728'}
+        ]
+        
+        # Create figure for KPI comparison
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        axes = axes.flatten()
+        
+        # Track if we actually have any data to plot
+        has_data = False
+        
+        # Plot each KPI
+        for idx, kpi_cfg in enumerate(kpi_configs):
+            if idx >= len(axes):
+                break
+                
+            ax = axes[idx]
+            kpi = kpi_cfg['id']
+            color = kpi_cfg['color']
+            
+            # Track if we have data for this specific KPI
+            kpi_has_data = False
+            
+            # Plot 2-KPI training data if available
+            if history_2kpi is not None and f'kpi_{kpi}' in history_2kpi.columns:
                 try:
-                    df = pd.read_csv(csv_file)
-                    if not df.empty and 'episode_reward' in df.columns:
-                        eval_dfs.append((df, label, color))
+                    df = history_2kpi[[f'kpi_{kpi}']].copy()
+                    df = df.apply(pd.to_numeric, errors='coerce').dropna()
+                    if not df.empty:
+                        # Smooth the KPI data
+                        window = min(10, len(df) // 10) or 1
+                        df['smoothed'] = df[f'kpi_{kpi}'].rolling(window=window, min_periods=1, center=True).mean()
+                        
+                        # Plot the smoothed line
+                        ax.plot(df.index, df['smoothed'], 
+                               label='2-KPI Training', 
+                               color=color,
+                               linewidth=2)
+                        
+                        kpi_has_data = True
+                        has_data = True
+                        print(f"Plotted 2-KPI {kpi} with {len(df)} data points")
                 except Exception as e:
-                    print(f"Error loading {csv_file}: {e}")
+                    print(f"Error plotting 2-KPI {kpi}: {str(e)}")
+            
+            # Plot multi-KPI training data if available
+            if history_multi is not None and f'kpi_{kpi}' in history_multi.columns:
+                try:
+                    df = history_multi[[f'kpi_{kpi}']].copy()
+                    df = df.apply(pd.to_numeric, errors='coerce').dropna()
+                    if not df.empty:
+                        # Smooth the KPI data
+                        window = min(10, len(df) // 10) or 1
+                        df['smoothed'] = df[f'kpi_{kpi}'].rolling(window=window, min_periods=1, center=True).mean()
+                        
+                        # Plot the smoothed line with a different style
+                        ax.plot(df.index, df['smoothed'], 
+                               label='Multi-KPI Training', 
+                               color=color,
+                               linestyle='--',
+                               linewidth=2,
+                               alpha=0.8)
+                        
+                        kpi_has_data = True
+                        has_data = True
+                        print(f"Plotted Multi-KPI {kpi} with {len(df)} data points")
+                except Exception as e:
+                    print(f"Error plotting Multi-KPI {kpi}: {str(e)}")
+            
+            # Only customize the subplot if we have data
+            if kpi_has_data:
+                ax.set_title(kpi_cfg['title'], fontsize=12, pad=10)
+                ax.set_xlabel('Training Steps', fontsize=10)
+                ax.set_ylabel('Score', fontsize=10)
+                ax.legend(loc='lower right' if kpi in ['comfort', 'resilience'] else 'upper right')
+                ax.grid(True, alpha=0.2)
+                
+                # Improve tick label formatting
+                ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{int(x/1000)}k' if x >= 1000 else int(x)))
+                
+                # Add a subtle border
+                for spine in ax.spines.values():
+                    spine.set_visible(True)
+                    spine.set_color('#dddddd')
             else:
-                print(f"CSV file not found: {csv_file}")
-
-        if eval_dfs:
-            print("Generating KPI comparison plot...")
-            fig2, ax2 = plt.subplots(1, 1, figsize=(10, 5))
-            kpi_cols = [c for c in eval_dfs[0][0].columns if c.startswith('KPI_')]
-            if kpi_cols:
-                try:
-                    names = [k[4:].replace('_', ' ').title() for k in kpi_cols]
-                    x = np.arange(len(names))
-                    width = 0.35 if len(eval_dfs) > 1 else 0.7
-                    for i, (df, label, color) in enumerate(eval_dfs):
-                        means = df[kpi_cols].mean().values
-                        stds = df[kpi_cols].std().values
-                        offset = width * (i - (len(eval_dfs)-1)/2)
-                        ax2.bar(x + offset, means, width, yerr=stds, label=label, color=color, alpha=0.7, capsize=5)
-                    ax2.set_xticks(x)
-                    ax2.set_xticklabels(names, rotation=45, ha='right')
-                    ax2.set_title('KPI Comparison')
-                    ax2.set_ylabel('Score')
-                    ax2.legend()
-                    plt.tight_layout()
-                    plt.savefig('plots/kpi_comparison.png')
-                    plt.close(fig2)
-                except Exception as e:
-                    print(f"Error generating KPI comparison plot: {e}")
+                # Hide empty subplots
+                ax.axis('off')
+        
+        # Add a main title
+        plt.suptitle('KPI Metrics Comparison', fontsize=16, y=1.02)
+        
+        # Adjust layout with more padding
+        plt.tight_layout(rect=[0, 0, 1, 0.98])
+        
+        # Save the KPI comparison plot
+        kpi_plot_path = os.path.join('plots', 'kpi_comparison.png')
+        plt.savefig(kpi_plot_path, dpi=120, bbox_inches='tight')
+        print(f"\nKPI comparison plot saved to: {os.path.abspath(kpi_plot_path)}")
+        
+        # Show the plot if in interactive mode
+        if 'IPython' in sys.modules:
+            plt.show()
         else:
+            plt.close(fig)
+        
+        print("\nAll plots generated successfully!")
+        
+    except Exception as e:
+        print(f"\nError generating plots: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        if not eval_dfs:
             print("No evaluation data available for KPI comparison")
+        raise
             
     except ImportError as e:
         print(f"Required libraries not found: {e}")
@@ -357,48 +500,53 @@ def main_multi_kpi_training(num_buildings: int, timesteps_per_episode: int) -> P
     # --- Agent Training (Multi-KPIs) ---
     print(f"Instantiating PPO agent for Multi-KPI training (TensorBoard logs: {TENSORBOARD_LOG_PATH_MULTI_BASE})...")
     
-    # Initialize PPO agent with configuration for multi-KPI training
+    # Enhanced policy network configuration for multi-KPI training
     policy_kwargs = {
-        'net_arch': dict(pi=[512, 256, 128], vf=[512, 256, 128]),  # Same network architecture as 2-KPI
+        'net_arch': {
+            'pi': [512, 512, 256],  # Deeper policy network
+            'vf': [512, 512, 256]   # Deeper value network
+        },
         'activation_fn': torch.nn.ReLU,
-        'ortho_init': True
+        'ortho_init': True,
+        'share_features_extractor': False,  # Separate feature extractors for policy and value
+        'log_std_init': 0.0,  # Initial log standard deviation for action distribution
+        'full_std': True,
+        'squash_output': False
     }
     
-    # Learning rate schedule with warmup
-    def lr_schedule(progress_remaining):
-        """Learning rate with warmup and cosine decay"""
-        # Linear warmup for first 20% of training
-        warmup_frac = 0.2
-        if progress_remaining > 1.0 - warmup_frac:
-            warmup_progress = (1.0 - progress_remaining) / warmup_frac
-            return 1e-3 * warmup_progress  # Higher initial learning rate
-            
-        # Cosine decay for the rest
-        progress = (1.0 - progress_remaining - warmup_frac) / (1.0 - warmup_frac)
-        min_lr = 1e-6  # Lower minimum learning rate
-        max_lr = 1e-3   # Higher maximum learning rate
-        return min_lr + 0.5 * (max_lr - min_lr) * (1 + np.cos(np.pi * progress))
-    
-    # Initialize PPO model
+    # Initialize PPO model with enhanced hyperparameters for better learning
     model = PPO(
         "MlpPolicy",
         env_multi,
-        learning_rate=lr_schedule,
-        n_steps=2048,  # Number of steps to run for each environment per update
-        batch_size=512,  # Minibatch size
-        n_epochs=10,  # Number of epochs for optimization
-        gamma=0.99,  # Discount factor
-        gae_lambda=0.95,  # Factor for trade-off of bias vs variance for GAE
-        clip_range=0.2,  # Clip parameter for the policy and value functions
-        clip_range_vf=None,  # Clip parameter for the value function
-        ent_coef=0.01,  # Entropy coefficient
-        vf_coef=0.5,  # Value function coefficient
-        max_grad_norm=0.5,  # Maximum norm for the gradient clipping
-        policy_kwargs=policy_kwargs,
+        n_steps=4096,         # More frequent updates with smaller batches
+        batch_size=512,        # Smaller batch size for more frequent updates
+        n_epochs=15,          # More epochs for better sample efficiency
+        gamma=0.999,          # Higher discount factor for longer-term rewards
+        gae_lambda=0.92,      # Lower lambda for lower variance in advantage estimates
+        clip_range_vf=0.15,   # Tighter clipping for value function
+        ent_coef=0.05,        # Higher entropy for better exploration
+        vf_coef=0.95,         # Higher weight on value function loss
+        max_grad_norm=0.5,    # Tighter gradient clipping for stability
+        use_sde=False,        # Disable SDE for discrete action spaces
+        target_kl=0.01,       # Tighter KL divergence for more stable updates
         tensorboard_log=TENSORBOARD_LOG_PATH_MULTI_BASE,
-        verbose=1,
+        policy_kwargs=policy_kwargs,
+        verbose=2,            # More detailed logging
         device='auto',
-        seed=SEED
+        normalize_advantage=True,
+        seed=SEED,            # Use the global SEED for reproducibility
+        # More aggressive learning rate schedule
+        learning_rate=LinearSchedule(
+            initial_p=5e-4,    # Higher initial learning rate
+            final_p=1e-6,      # Lower final learning rate
+            total_timesteps=TOTAL_TIMESTEPS_MULTI
+        ),
+        # More aggressive clip range schedule
+        clip_range=LinearSchedule(
+            initial_p=0.25,    # Higher initial clip range
+            final_p=0.05,      # Lower final clip range
+            total_timesteps=TOTAL_TIMESTEPS_MULTI
+        )
     )
     
     # --- Callbacks ---
@@ -505,6 +653,21 @@ def main_multi_kpi_training(num_buildings: int, timesteps_per_episode: int) -> P
     print(f"Starting Multi-KPI training for {TOTAL_TIMESTEPS_MULTI} timesteps...")
     
     try:
+        # Evaluate initial random policy
+        print("\n=== Evaluating Initial Random Policy ===")
+        initial_rewards = []
+        for _ in range(5):  # Run 5 episodes to get a good estimate
+            obs = env_multi.reset()
+            done = False
+            total_reward = 0
+            while not done:
+                action = env_multi.action_space.sample()  # Random action
+                obs, reward, done, _ = env_multi.step(action)
+                total_reward += reward
+            initial_rewards.append(total_reward)
+        initial_avg_reward = np.mean(initial_rewards)
+        print(f"Initial average reward (random policy): {initial_avg_reward:.2f}")
+
         # Train the model
         model.learn(
             total_timesteps=TOTAL_TIMESTEPS_MULTI,
@@ -512,10 +675,35 @@ def main_multi_kpi_training(num_buildings: int, timesteps_per_episode: int) -> P
             progress_bar=True,
             tb_log_name="PPO_MultiKPI"
         )
-        
+            
         # Save the final model
         model_path = os.path.join('models', 'ppo_multi_kpi_model')
+        print(f"Multi-KPI Training finished. Saving model to {model_path} ...")
         model.save(model_path)
+            
+        # Evaluate final policy
+        print("\n=== Evaluating Trained Policy ===")
+        final_rewards = []
+        for _ in range(5):  # Run 5 episodes to get a good estimate
+            obs = eval_env.reset()
+            done = False
+            total_reward = 0
+            while not done:
+                action, _ = model.predict(obs, deterministic=True)
+                obs, reward, done, _ = eval_env.step(action)
+                total_reward += reward
+            final_rewards.append(total_reward)
+        final_avg_reward = np.mean(final_rewards)
+        
+        # Calculate improvement
+        improvement = ((final_avg_reward - initial_avg_reward) / (abs(initial_avg_reward) + 1e-10)) * 100
+        
+        # Print training summary
+        print("\n=== Training Summary ===")
+        print(f"Initial Average Reward (Random Policy): {initial_avg_reward:.2f}")
+        print(f"Final Average Reward (Trained Policy): {final_avg_reward:.2f}")
+        print(f"Improvement: {improvement:+.2f}%")
+        print("=====================")
         print(f"\nMulti-KPI Training complete! Model saved to {model_path}")
         
         # Save the final evaluation results
@@ -555,6 +743,8 @@ def main_2kpi_training(num_buildings: int, timesteps_per_episode: int) -> PPO:
     Returns:
         PPO: Trained PPO agent
     """
+    import numpy as np  # Import numpy for numerical operations
+    import torch as th  # Import PyTorch with th alias for activation functions
     # Import EvalCallback here to ensure it's in scope
     from stable_baselines3.common.callbacks import EvalCallback
     
@@ -563,8 +753,8 @@ def main_2kpi_training(num_buildings: int, timesteps_per_episode: int) -> PPO:
     # Set fixed random seed for reproducibility
     set_seed(SEED)
     
-    # Set up weights for comfort and emissions only
-    comfort_emissions_weights = PhaseWeights(w1=0.5, w2=0.5, w3=0.0, w4=0.0)
+    # Set up weights for comfort and emissions only, with higher weight on comfort
+    comfort_emissions_weights = PhaseWeights(w1=0.8, w2=0.2, w3=0.0, w4=0.0)  # Focus more on comfort (w1)
     
     # Ensure directories exist
     os.makedirs(TENSORBOARD_LOG_PATH_2KPI_BASE, exist_ok=True)
@@ -586,78 +776,62 @@ def main_2kpi_training(num_buildings: int, timesteps_per_episode: int) -> PPO:
     env_2kpi.reset()
 
     # --- Agent Training (2-KPIs) ---
-    print(f"Instantiating PPO agent for 2-KPI training (TensorBoard logs: {TENSORBOARD_LOG_PATH_2KPI_BASE})...")
+    print(f"\nInstantiating PPO agent for 2-KPI training (TensorBoard logs: {TENSORBOARD_LOG_PATH_2KPI_BASE})...")
     
-    # Initialize PPO agent with enhanced configuration for 2-KPI training
+    # Enhanced network architecture with better exploration
     policy_kwargs = {
-        'net_arch': dict(pi=[512, 256, 128], vf=[512, 256, 128]),  # Deeper network for better learning
-        'activation_fn': torch.nn.ReLU,  # ReLU for better gradient flow in deeper networks
+        'net_arch': {
+            'pi': [256, 256],  # Deeper policy network
+            'vf': [256, 256]   # Deeper value network
+        },
+        'activation_fn': th.nn.ReLU,
         'ortho_init': True,
-        'log_std_init': -0.5,  # Slightly higher std for better exploration
+        'log_std_init': -1.0,  # Start with more exploration
+        'share_features_extractor': False,  # Separate feature extractors for policy and value
         'optimizer_kwargs': {
-            'eps': 1e-5,  # Better numerical stability
-            'weight_decay': 1e-6  # Small weight decay for regularization
+            'weight_decay': 1e-5,  # Slightly higher weight decay
+            'eps': 1e-5
         }
     }
     
-    # More aggressive learning rate schedule with longer training
+    # Stable learning rate schedule with warmup and decay
     def lr_schedule(progress_remaining):
-        """Learning rate with warmup and cosine decay"""
-        import numpy as np
-        
-        # Linear warmup for first 20% of training
-        warmup_frac = 0.2
-        if progress_remaining > 1.0 - warmup_frac:
-            warmup_progress = (1.0 - progress_remaining) / warmup_frac
-            return 1e-3 * warmup_progress  # Higher initial learning rate
-            
-        # Cosine decay for the rest
-        progress = (1.0 - progress_remaining - warmup_frac) / (1.0 - warmup_frac)
-        min_lr = 1e-6  # Lower minimum learning rate
-        max_lr = 1e-3   # Higher maximum learning rate
-        return min_lr + 0.5 * (max_lr - min_lr) * (1 + np.cos(np.pi * progress))
+        """Warmup from 1e-6 to 1e-4, then decay to 1e-5"""
+        warmup_steps = 0.2  # First 20% of training
+        if progress_remaining > 1.0 - warmup_steps:
+            # Warmup phase
+            return 1e-6 + (1e-4 - 1e-6) * ((1.0 - progress_remaining) / warmup_steps)
+        # Decay phase - slower decay
+        return max(1e-5, 1e-4 * (progress_remaining / (1.0 - warmup_steps))**0.5)
     
-    # Enhanced PPO configuration with improved learning dynamics
+    # Enhanced PPO agent with optimized hyperparameters for 2-KPI training
     model_2kpi = PPO(
-        "MlpPolicy",
+        'MlpPolicy',
         env_2kpi,
-        # Core hyperparameters
-        learning_rate=3e-4,          # Fixed learning rate
-        n_steps=2048,                # Longer rollouts for better advantage estimation
-        batch_size=512,              # Larger batch size for more stable updates
-        n_epochs=10,                 # More epochs for better sample efficiency
-        gamma=0.99,                  # Standard discount factor
-        gae_lambda=0.95,             # Standard GAE lambda
-        
-        # Clipping and constraints
-        clip_range=0.2,              # Standard clip range
-        clip_range_vf=None,          # Disable separate VF clipping
-        max_grad_norm=0.5,           # Standard gradient clipping
-        target_kl=0.03,              # Slightly more lenient KL threshold
-        
-        # Exploration vs exploitation
-        ent_coef=0.02,               # Balanced entropy coefficient
-        vf_coef=0.5,                 # Standard value function coefficient
-        
-        # Network architecture
-        policy_kwargs=dict(
-            net_arch=dict(pi=[256, 128], vf=[256, 128]),  # Separate networks for policy and value
-            activation_fn=torch.nn.ReLU,
-            ortho_init=True,
-            log_std_init=-0.5  # Moderate initial exploration
-        ),
-        
-        # Logging and monitoring
+        n_steps=4096,             # Longer rollouts for better advantage estimation
+        batch_size=256,           # Larger batch size for more stable updates
+        n_epochs=10,              # More epochs for better sample efficiency
+        gamma=0.997,              # Higher discount factor for longer-term rewards
+        gae_lambda=0.95,          # Standard GAE lambda for balanced bias-variance
+        clip_range=0.2,           # Standard PPO clipping range
+        clip_range_vf=0.2,        # Add clipping for value function
+        ent_coef=0.05,            # Higher entropy for better exploration
+        vf_coef=0.85,             # Higher value function coefficient
+        max_grad_norm=0.75,       # Slightly higher gradient clipping
+        policy_kwargs=policy_kwargs,
         tensorboard_log=TENSORBOARD_LOG_PATH_2KPI_BASE,
         verbose=2,
-        device='auto',
-        seed=42,
         normalize_advantage=True,
-        
-        # Disable unused features
+        target_kl=0.02,           # Tighter KL divergence for more stable updates
+        seed=SEED,
+        stats_window_size=20,
         use_sde=False,
-        sde_sample_freq=-1,
-        stats_window_size=100
+        # Learning rate with linear schedule
+        learning_rate=LinearSchedule(
+            initial_p=3e-4,
+            final_p=1e-5,
+            total_timesteps=TOTAL_TIMESTEPS_2KPI
+        )
     )
 
     print(f"Starting 2-KPI training for {TOTAL_TIMESTEPS_2KPI} timesteps...")
@@ -749,295 +923,35 @@ def main_2kpi_training(num_buildings: int, timesteps_per_episode: int) -> PPO:
     # Combine callbacks
     callbacks = [eval_callback, CustomCallback()]
     
-    # Ensure the callback is properly initialized
-    if not hasattr(eval_callback, 'evaluations_results'):
-        eval_callback.evaluations_results = {'episodes_lengths': [], 'episodes_rewards': []}
+    # Start the training with progress bar
+    print("\n" + "="*50)
+    print("STARTING TRAINING")
+    print("="*50 + "\n")
     
-    # Train the model with enhanced callbacks and progress tracking
     try:
-        from tqdm.auto import tqdm
-        progress_bar = tqdm(total=TOTAL_TIMESTEPS_2KPI, desc="Training progress")
-        
-        # Update progress bar callback
-        class ProgressBarCallback(BaseCallback):
-            def __init__(self, total_timesteps):
-                super(ProgressBarCallback, self).__init__()
-                self.progress_bar = None
-                self.total_timesteps = total_timesteps
-                
-            def _on_training_start(self):
-                self.progress_bar = tqdm(total=self.total_timesteps, desc="Training progress")
-                
-            def _on_step(self) -> bool:
-                self.progress_bar.update(self.training_env.num_envs)
-                return True
-                
-            def _on_training_end(self):
-                self.progress_bar.close()
-        
-        # Add progress bar to callbacks
-        callbacks.append(ProgressBarCallback(total_timesteps=TOTAL_TIMESTEPS_2KPI))
-    except ImportError:
-        print("tqdm not installed, progress bar will not be shown")
-    
-    # Train the model with all callbacks
-    model_2kpi.learn(
-        total_timesteps=TOTAL_TIMESTEPS_2KPI,
-        callback=callbacks,
-        progress_bar=True,
-        tb_log_name="ppo_2kpi_training",
-        reset_num_timesteps=True
-    )
-
-    # Save the final model
-    model_save_path = os.path.join('models', MODEL_SAVE_PATH_2KPI_BASE + ".zip")
-    print(f"2-KPI Training finished. Saving model to {model_save_path} ...")
-    model_2kpi.save(model_save_path)
-    
-    # Clean up
-    eval_env.close()
-
-    env_2kpi.close()
-    print("2-KPI Training environment closed.")
-
-    # --- Evaluation ---
-    import numpy as np  # Import numpy for calculations
-    print("\n=== Evaluating 2-KPI Trained Model ===")
-    eval_env = CustomCityEnv(
-        phase_weights=comfort_emissions_weights,
-        num_buildings=num_buildings,
-        timesteps_per_episode=timesteps_per_episode
-    )
-    eval_env.seed(SEED)  # Set fixed seed for evaluation
-    
-    # Evaluate the agent
-    episode_rewards = []
-    episode_lengths = []
-    
-    for i in range(N_EVAL_EPISODES):
-        obs = eval_env.reset()
-        done = False
-        episode_reward = 0
-        episode_length = 0
-        
-        print(f"Starting 2-KPI Evaluation Episode {i+1}/{N_EVAL_EPISODES}")
-        
-        while not done:
-            action, _ = model_2kpi.predict(obs, deterministic=True)
-            obs, reward, done, _ = eval_env.step(action)
-            episode_reward += reward
-            episode_length += 1
-        
-        episode_rewards.append(episode_reward)
-        episode_lengths.append(episode_length)
-        
-        # Log the evaluation episode
-        training_logger.log_episode(
-            episode=i,
-            reward=episode_reward,
-            episode_length=episode_length,
-            phase='2kpi_eval',
-            min_reward=REWARD_BOUNDS['2kpi']['min'],
-            max_reward=REWARD_BOUNDS['2kpi']['max']
+        # Train the model
+        model_2kpi.learn(
+            total_timesteps=TOTAL_TIMESTEPS_2KPI,
+            callback=callbacks,
+            progress_bar=True,
+            reset_num_timesteps=True,
+            tb_log_name="PPO_2KPI"
         )
         
-        print(f"2-KPI Evaluation Episode {i+1} Reward: {episode_reward:.4f}")
+        # Save the final model
+        model_path = os.path.join('models', 'ppo_2kpi_final')
+        model_2kpi.save(model_path)
+        print(f"\nTraining completed. Model saved to {model_path}")
+        
+    except Exception as e:
+        print(f"\nError during training: {str(e)}")
+        import traceback
+        traceback.print_exc()
     
-    # Save evaluation results
-    eval_results = pd.DataFrame({
-        'episode': range(1, N_EVAL_EPISODES + 1),
-        'reward': episode_rewards,
-        'normalized_reward': [
-            normalize_reward(r, REWARD_BOUNDS['2kpi']['min'], REWARD_BOUNDS['2kpi']['max']) 
-            for r in episode_rewards
-        ],
-        'episode_length': episode_lengths,
-        'phase': ['2kpi_eval'] * N_EVAL_EPISODES
-    })
-    
-    # Ensure directory exists
-    os.makedirs(os.path.dirname(EVAL_RESULTS_CSV_2KPI) or '.', exist_ok=True)
-    eval_results.to_csv(EVAL_RESULTS_CSV_2KPI, index=False)
-    
-    # Log summary statistics
-    mean_reward = np.mean(episode_rewards)
-    std_reward = np.std(episode_rewards)
-    mean_normalized = np.mean(eval_results['normalized_reward'])
-    
-    print("\n=== 2-KPI Evaluation Summary ===")
-    print(f"Episodes: {N_EVAL_EPISODES}")
-    print(f"Mean Reward: {mean_reward:.4f} ± {std_reward:.4f}")
-    print(f"Mean Normalized Reward: {mean_normalized:.4f}")
-    print(f"Min/Max Reward: {min(episode_rewards):.4f}/{max(episode_rewards):.4f}")
-    print(f"Results saved to: {EVAL_RESULTS_CSV_2KPI}")
-    print("================================")
-    
-    # Close the environment
-    eval_env.close()
-    print(f"2-KPI Evaluation results saved to {EVAL_RESULTS_CSV_2KPI}")
-    
-    # Save training logger data
-    training_logger.save_to_csv('training_2kpi_logs.csv')
-    
-    return model_2kpi  # Return the trained model for potential use in multi-KPI training
-    print("2-KPI Evaluation environment closed.")
-    # --- Environment Setup ---
-    print(f"Setting up CustomCityEnv for Multi-KPI training (Buildings: {num_buildings}, Timesteps/Episode: {timesteps_per_episode})...")
-    env_multi = CustomCityEnv(
-        phase_weights=all_kpi_weights,
-        num_buildings=num_buildings,
-        timesteps_per_episode=timesteps_per_episode
-    )
-    env_multi.seed(SEED)  # Set environment seed for reproducibility
-
-    # --- Agent Setup: Load policy from 2-KPI model ---
-    path_to_2kpi_model = MODEL_SAVE_PATH_2KPI_BASE + ".zip"
-    print(f"Loading policy from 2-KPI model: {path_to_2kpi_model}")
-
-    # First create the environment to get the correct observation space
-    print(f"Setting up environment to get observation space...")
-    temp_env = CustomCityEnv(
-        phase_weights=multi_kpi_weights,
-        num_buildings=num_buildings,
-        timesteps_per_episode=timesteps_per_episode
-    )
-    obs_shape = temp_env.observation_space.shape[0]
-    temp_env.close()
-    
-    # Initialize PPO agent with enhanced configuration for multi-KPI training
-    policy_kwargs = {
-        'net_arch': dict(pi=[256, 256], vf=[256, 256]), # MODIFIED: Smaller network
-        'activation_fn': torch.nn.ReLU,  # ReLU for deeper networks
-        'ortho_init': True,
-        'log_std_init': -0.5,  # Slightly higher initial std for better exploration
-        'optimizer_kwargs': {
-            'eps': 1e-8,  # Increased numerical stability
-            'weight_decay': 1e-6  # Small weight decay for better generalization
-        }
-    }
-    
-    # Learning rate schedule with warmup and cosine decay for multi-KPI
-    def lr_schedule(progress_remaining):
-        """Cosine decay with warmup for learning rate with longer warmup"""
-        # Linear warmup for first 20% of training
-        warmup_frac = 0.2
-        if progress_remaining > 1.0 - warmup_frac:
-            warmup_progress = (1.0 - progress_remaining) / warmup_frac
-            return 2e-4 * warmup_progress  # MODIFIED: Lower initial LR
-            
-        # Cosine decay for the rest
-        progress = (1.0 - progress_remaining - warmup_frac) / (1.0 - warmup_frac)
-        min_lr = 1e-6 # MODIFIED: Lower min LR
-        max_lr = 2e-4 # MODIFIED: Lower max LR
-        return min_lr + 0.5 * (max_lr - min_lr) * (1 + np.cos(np.pi * progress))
-    
-    # Initialize the model with optimized hyperparameters for multi-KPI training
-    model_multi_kpi = PPO(
-        "MlpPolicy",
-        env_multi_kpi,
-        learning_rate=lr_schedule,
-        n_steps=4096,           # More steps per update for better gradient estimates
-        batch_size=512,         # Larger batch size for more stable updates
-        n_epochs=10,            # MODIFIED: Fewer epochs
-        gamma=0.995,            # Slightly higher discount factor for longer-term rewards
-        gae_lambda=0.97,        # Adjusted for better bias-variance tradeoff
-        clip_range=0.18,        # Slightly higher clip range for more exploration
-        clip_range_vf=0.18,     # Add clipping for value function
-        ent_coef=0.02,         # MODIFIED: Increased entropy
-        vf_coef=0.8,            # Higher weight on value function loss
-        max_grad_norm=0.8,      # Increased gradient clipping for stability
-        use_sde=False,          # Disable SDE for discrete action spaces
-        target_kl=0.03,         # Slightly higher KL threshold
-        tensorboard_log=TENSORBOARD_LOG_PATH_MULTI_BASE,
-        policy_kwargs=policy_kwargs,
-        verbose=2,              # More detailed logging
-        device='auto',
-        normalize_advantage=True,
-        seed=42
-    )
-    
-    # Load the 2-KPI model if it exists
-    if os.path.exists(path_to_2kpi_model):
-        print(f"Loading weights from 2-KPI model: {path_to_2kpi_model}")
-        try:
-            # Load the saved model with the original environment to extract weights
-            saved_model = PPO.load(path_to_2kpi_model, device='auto')
-            # Get the state dict
-            saved_state_dict = saved_model.policy.state_dict()
-            # Load the state dict into our new model
-            model_multi_kpi.policy.load_state_dict(saved_state_dict, strict=False)
-            print("Successfully loaded compatible weights from 2-KPI model")
-        except Exception as e:
-            print(f"Could not load 2-KPI model weights due to: {str(e)}")
-            print("Starting training from scratch")
-    else:
-        print("2-KPI model not found, starting training from scratch")
-    
-
-
-    # --- Agent Training (Multi-KPIs) ---
-    print(f"Starting Multi-KPI training for {TOTAL_TIMESTEPS_MULTI} timesteps...")
-    
-    # Add callbacks for evaluation and learning rate scheduling
-    from stable_baselines3.common.callbacks import EvalCallback, CallbackList, BaseCallback
-    from stable_baselines3.common.vec_env import DummyVecEnv
-    import numpy as np
-    
-    # Create eval environment
-    eval_env = CustomCityEnv(
-        phase_weights=multi_kpi_weights,
-        num_buildings=num_buildings,
-        timesteps_per_episode=timesteps_per_episode
-    )
-    
-    # Wrap eval env if needed
-    if not isinstance(eval_env, DummyVecEnv):
-        eval_env = DummyVecEnv([lambda: eval_env])
-    
-    # Define evaluation callback with more frequent checks
-    eval_callback = EvalCallback(
-        eval_env,
-        best_model_save_path='./best_model_multi_kpi/',
-        log_path='./logs_multi_kpi/',
-        eval_freq=max(EVAL_FREQ // num_buildings, 1),  # Use the global EVAL_FREQ
-        deterministic=True,
-        render=False,
-        n_eval_episodes=5,  # More episodes for better evaluation
-        warn=False
-    )
-    
-    # Learning rate schedule
-    def lr_schedule(progress_remaining):
-        """Linear decay for learning rate"""
-        initial_lr = 2e-4
-        min_lr = 1e-5
-        return min_lr + (initial_lr - min_lr) * progress_remaining
-    
-    # Update learning rate
-    model_multi_kpi.learning_rate = lr_schedule(1.0)  # Start with initial LR
-    
-    # Train the agent with evaluation callback and progress tracking
-    model_multi_kpi.learn(
-        total_timesteps=TOTAL_TIMESTEPS_MULTI,
-        callback=eval_callback,
-        progress_bar=True,
-        tb_log_name="PPO_MultiKPI",
-        reset_num_timesteps=False  # Continue from previous training
-    )
-
-    model_save_path = MODEL_SAVE_PATH_MULTI_BASE + ".zip"
-    print(f"Multi-KPI Training finished. Saving model to {model_save_path} ...")
-    print("Multi-KPI Evaluation environment closed.")
-    
-    # Save training logger data
-    training_logger.save_to_csv('training_multi_kpi_logs.csv')
-    
-    print("=== Multi-KPI Training and Evaluation Phase Finished ===")
-    
-    return model_multi_kpi
-
     # Plot training and evaluation results
     plot_training_results()
+    
+    return model_2kpi  # Return the trained model
 
 def compare_training_results():
     """Compare and visualize results from 2-KPI and Multi-KPI training."""
@@ -1078,8 +992,8 @@ if __name__ == "__main__":
     TIMESTEPS_PER_EPISODE_MAIN = 24 * 7  # One week of hourly timesteps
     ENABLE_MULTI_KPI_TRAINING = True  # Enable multi-KPI training
     
-    # Set fixed random seed for reproducibility
-    SEED = 42
+    # Generate a random seed for reproducibility
+    SEED = random.randint(0, 10000)  # Random seed between 0 and 9999
     set_seed(SEED)
     
     print("\n" + "="*50)
@@ -1105,13 +1019,13 @@ if __name__ == "__main__":
         print("\n" + "=" * 50)
         print("MULTI-KPI TRAINING")
         print("=" * 50 + "\n")
-        
+
         try:
             model_multi_kpi = main_multi_kpi_training(
                 num_buildings=NUM_BUILDINGS_MAIN,
                 timesteps_per_episode=TIMESTEPS_PER_EPISODE_MAIN
             )
-            
+
             # Save the final multi-KPI model if training was successful
             model_multi_kpi.save(os.path.join('models', 'ppo_multi_kpi_model'))
             print("Multi-KPI Training finished. Model saved to models/ppo_multi_kpi_model.zip")
@@ -1121,6 +1035,7 @@ if __name__ == "__main__":
             print(f"Error during Multi-KPI training: {str(e)}")
     else:
         print("\nMulti-KPI training is disabled. Set ENABLE_MULTI_KPI_TRAINING = True to enable it.")
+
     
     print("\n" + "="*50)
     print("TRAINING COMPLETE")
