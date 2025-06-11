@@ -977,6 +977,8 @@ if __name__ == "__main__":
     # Training parameters
     NUM_BUILDINGS_MAIN = 1  # Number of buildings to train on
     TIMESTEPS_PER_EPISODE_MAIN = 24 * 7  # One week of hourly timesteps
+    TOTAL_TIMESTEPS_2KPI = 500000  # Total number of timesteps for 2-KPI training
+    TOTAL_TIMESTEPS_MULTI = 500000  # Total number of timesteps for Multi-KPI training
     ENABLE_MULTI_KPI_TRAINING = True  # Enable multi-KPI training
     
     # Generate a random seed for reproducibility
