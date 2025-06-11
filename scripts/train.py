@@ -12,6 +12,11 @@ TensorBoard logging is enabled for monitoring training progress.
 """
 import os
 import sys
+from pathlib import Path
+
+# Ensure the src package is discoverable
+sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
+
 import time
 import torch
 import random
@@ -93,7 +98,7 @@ class TrainingLogger:
 def cleanup_previous_runs():
     """Remove previous model files and logs to ensure a fresh start."""
     # Remove model files
-    for model_file in glob.glob('ppo_*_model*') + glob.glob('models/ppo_*_model*'):
+    for model_file in glob.glob('ppo_*_model*') + glob.glob(os.path.join('results', 'models', 'ppo_*_model*')):
         try:
             if os.path.isfile(model_file):
                 os.remove(model_file)
@@ -103,7 +108,10 @@ def cleanup_previous_runs():
             print(f"Warning: Could not remove {model_file}: {e}")
     
     # Remove tensorboard logs
-    for log_dir in ['ppo_tensorboard_logs_2kpi', 'ppo_tensorboard_logs_multi_kpi']:
+    for log_dir in [
+        os.path.join('results', 'ppo_tensorboard_logs_2kpi'),
+        os.path.join('results', 'ppo_tensorboard_logs_multi_kpi')
+    ]:
         try:
             if os.path.exists(log_dir):
                 shutil.rmtree(log_dir)
@@ -113,9 +121,9 @@ def cleanup_previous_runs():
 # Run cleanup at the start
 cleanup_previous_runs()
 
-# Assuming AICrowdControl.py and CustomCityEnv.py are in the same directory or PYTHONPATH
-from AICrowdControl import PhaseWeights, BASELINE_KPIS # BASELINE_KPIS is used by CustomCityEnv
-from CustomCityEnv import CustomCityEnv
+# Import environment and reward calculation from the src package
+from citylearn_rl.reward import PhaseWeights, BASELINE_KPIS  # BASELINE_KPIS is used by CustomCityEnv
+from citylearn_rl.env import CustomCityEnv
 
 # --- Constants for training phases ---
 SEED = 42
@@ -126,19 +134,19 @@ TOTAL_TIMESTEPS_MULTI = 500000
 EVAL_FREQ = 5000  # Evaluate every 5k steps
 N_EVAL_EPISODES = 5  # Number of episodes for evaluation
 
-MODEL_SAVE_PATH_2KPI_BASE = "ppo_2kpi_model"
-MODEL_SAVE_PATH_MULTI_BASE = "ppo_multi_kpi_model"
-TENSORBOARD_LOG_PATH_2KPI_BASE = os.path.join("ppo_tensorboard_logs_2kpi")
-TENSORBOARD_LOG_PATH_MULTI_BASE = os.path.join("ppo_tensorboard_logs_multi_kpi")
+MODEL_SAVE_PATH_2KPI_BASE = os.path.join("results", "models", "ppo_2kpi_model")
+MODEL_SAVE_PATH_MULTI_BASE = os.path.join("results", "models", "ppo_multi_kpi_model")
+TENSORBOARD_LOG_PATH_2KPI_BASE = os.path.join("results", "ppo_tensorboard_logs_2kpi")
+TENSORBOARD_LOG_PATH_MULTI_BASE = os.path.join("results", "ppo_tensorboard_logs_multi_kpi")
 
 REWARD_BOUNDS = {
     '2kpi': {'min': 0, 'max': 10},    # Adjust these values based on your environment
     'multi': {'min': 0, 'max': 10}    # Adjust these values based on your environment
 }
 
-training_logger = TrainingLogger(log_dir='training_logs')
-EVAL_RESULTS_CSV_2KPI = 'evaluation_results_2kpi.csv'
-EVAL_RESULTS_CSV_MULTI = 'evaluation_results_multi_kpi.csv'
+training_logger = TrainingLogger(log_dir=os.path.join("results", "training_logs"))
+EVAL_RESULTS_CSV_2KPI = os.path.join("results", "evaluation_results_2kpi.csv")
+EVAL_RESULTS_CSV_MULTI = os.path.join("results", "evaluation_results_multi_kpi.csv")
 
 def smooth_data(y, window_size=5):
     """Smooth 1D array using a moving average."""
@@ -321,10 +329,10 @@ def plot_training_results(window_size=25):
         plt.tight_layout()
         
         # Ensure plots directory exists
-        os.makedirs('plots', exist_ok=True)
+        os.makedirs(os.path.join('results', 'plots'), exist_ok=True)
         
         # Save the figure
-        plot_path = os.path.join('plots', 'training_curves.png')
+        plot_path = os.path.join('results', 'plots', 'training_curves.png')
         plt.savefig(plot_path, dpi=120, bbox_inches='tight')
         print(f"\nTraining curves saved to: {os.path.abspath(plot_path)}")
         
@@ -441,7 +449,7 @@ def plot_training_results(window_size=25):
         plt.tight_layout(rect=[0, 0, 1, 0.98])
         
         # Save the KPI comparison plot
-        kpi_plot_path = os.path.join('plots', 'kpi_comparison.png')
+        kpi_plot_path = os.path.join('results', 'plots', 'kpi_comparison.png')
         plt.savefig(kpi_plot_path, dpi=120, bbox_inches='tight')
         print(f"\nKPI comparison plot saved to: {os.path.abspath(kpi_plot_path)}")
         
@@ -498,8 +506,8 @@ def main_multi_kpi_training(num_buildings: int, timesteps_per_episode: int) -> P
     
     # Ensure directories exist
     os.makedirs(TENSORBOARD_LOG_PATH_MULTI_BASE, exist_ok=True)
-    os.makedirs('models', exist_ok=True)
-    os.makedirs('logs', exist_ok=True)
+    os.makedirs(os.path.join('results', 'models'), exist_ok=True)
+    os.makedirs(os.path.join('results', 'logs'), exist_ok=True)
 
     # --- Environment Setup ---
     print(f"Setting up CustomCityEnv for Multi-KPI training (Buildings: {num_buildings}, Timesteps/Episode: {timesteps_per_episode})...")
@@ -566,8 +574,8 @@ def main_multi_kpi_training(num_buildings: int, timesteps_per_episode: int) -> P
     # Evaluation callback
     eval_callback = EvalCallback(
         eval_env,
-        best_model_save_path='models/',
-        log_path='evaluation',
+        best_model_save_path=os.path.join('results', 'models'),
+        log_path=os.path.join('results', 'evaluation'),
         eval_freq=EVAL_FREQ,
         n_eval_episodes=5,
         deterministic=True,
@@ -682,7 +690,7 @@ def main_multi_kpi_training(num_buildings: int, timesteps_per_episode: int) -> P
         )
             
         # Save the final model
-        model_path = os.path.join('models', 'ppo_multi_kpi_model')
+        model_path = os.path.join('results', 'models', 'ppo_multi_kpi_model')
         print(f"Multi-KPI Training finished. Saving model to {model_path} ...")
         model.save(model_path)
             
@@ -763,8 +771,8 @@ def main_2kpi_training(num_buildings: int, timesteps_per_episode: int) -> PPO:
     
     # Ensure directories exist
     os.makedirs(TENSORBOARD_LOG_PATH_2KPI_BASE, exist_ok=True)
-    os.makedirs('models', exist_ok=True)
-    os.makedirs('logs', exist_ok=True)
+    os.makedirs(os.path.join('results', 'models'), exist_ok=True)
+    os.makedirs(os.path.join('results', 'logs'), exist_ok=True)
 
     # --- Environment Setup ---
     print(f"Setting up CustomCityEnv for 2-KPI training (Buildings: {num_buildings}, Timesteps/Episode: {timesteps_per_episode})...")
@@ -831,14 +839,14 @@ def main_2kpi_training(num_buildings: int, timesteps_per_episode: int) -> PPO:
     )
     
     # Create necessary directories
-    os.makedirs('models', exist_ok=True)
-    os.makedirs('logs', exist_ok=True)
+    os.makedirs(os.path.join('results', 'models'), exist_ok=True)
+    os.makedirs(os.path.join('results', 'logs'), exist_ok=True)
     
     # Enhanced evaluation callback with more frequent evaluation and better logging
     eval_callback = EvalCallback(
         eval_env,
-        best_model_save_path=os.path.join('models', 'best_2kpi'),
-        log_path=os.path.join('logs', '2kpi_eval'),
+        best_model_save_path=os.path.join('results', 'models', 'best_2kpi'),
+        log_path=os.path.join('results', 'logs', '2kpi_eval'),
         eval_freq=max(5000 // num_buildings, 1),  # More frequent evaluation
         deterministic=False,  # Use stochastic actions for evaluation for better exploration
         render=False,
@@ -926,7 +934,7 @@ def main_2kpi_training(num_buildings: int, timesteps_per_episode: int) -> PPO:
         )
         
         # Save the final model
-        model_path = os.path.join('models', 'ppo_2kpi_final')
+        model_path = os.path.join('results', 'models', 'ppo_2kpi_final')
         model_2kpi.save(model_path)
         print(f"\nTraining completed. Model saved to {model_path}")
         
@@ -944,7 +952,7 @@ def compare_training_results():
     """Compare and visualize results from 2-KPI and Multi-KPI training."""
     try:
         # Define file paths
-        eval_results_2kpi = 'evaluation_results_2kpi.csv'
+        eval_results_2kpi = EVAL_RESULTS_CSV_2KPI
         
         # Check if 2-KPI results exist
         if not os.path.exists(eval_results_2kpi):
@@ -958,7 +966,7 @@ def compare_training_results():
         print(f"Mean Normalized Reward: {results_2kpi['normalized_reward'].mean():.4f} ± {results_2kpi['normalized_reward'].std():.4f}")
         
         # Check for Multi-KPI results
-        eval_results_multi = 'evaluation_results_multi.csv'
+        eval_results_multi = EVAL_RESULTS_CSV_MULTI
         if os.path.exists(eval_results_multi):
             results_multi = pd.read_csv(eval_results_multi)
             print("\n=== Multi-KPI Training Results ===")
@@ -970,9 +978,9 @@ def compare_training_results():
 
 if __name__ == "__main__":
     # Set up logging
-    os.makedirs('logs', exist_ok=True)
-    os.makedirs('models', exist_ok=True)
-    os.makedirs('evaluation', exist_ok=True)
+    os.makedirs(os.path.join('results', 'logs'), exist_ok=True)
+    os.makedirs(os.path.join('results', 'models'), exist_ok=True)
+    os.makedirs(os.path.join('results', 'evaluation'), exist_ok=True)
     
     # Training parameters
     NUM_BUILDINGS_MAIN = 1  # Number of buildings to train on
@@ -1016,8 +1024,8 @@ if __name__ == "__main__":
             )
 
             # Save the final multi-KPI model if training was successful
-            model_multi_kpi.save(os.path.join('models', 'ppo_multi_kpi_model'))
-            print("Multi-KPI Training finished. Model saved to models/ppo_multi_kpi_model.zip")
+            model_multi_kpi.save(os.path.join('results', 'models', 'ppo_multi_kpi_model'))
+            print("Multi-KPI Training finished. Model saved to results/models/ppo_multi_kpi_model.zip")
         except NameError:
             print("Skipping Multi-KPI training: main_multi_kpi_training function not implemented.")
         except Exception as e:

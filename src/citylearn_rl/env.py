@@ -12,7 +12,7 @@ import gym
 from gym import spaces
 import numpy as np
 import pandas as pd # Required for generate_dummy_environment_data
-from AICrowdControl import ControlTrackReward, PhaseWeights, BASELINE_KPIS # Assuming AICrowdControl.py is in the same directory or accessible in PYTHONPATH
+from .reward import ControlTrackReward, PhaseWeights, BASELINE_KPIS
 
 # Copied from train_agent.py - consider refactoring this into a common utility module later
 def generate_dummy_environment_data(num_timesteps, num_buildings, action=None):

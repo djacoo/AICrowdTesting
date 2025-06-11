@@ -16,8 +16,8 @@ from pathlib import Path
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
 # Default directories
-DEFAULT_2KPI_LOG_DIR = "ppo_tensorboard_logs_2kpi"
-DEFAULT_MULTI_KPI_LOG_DIR = "ppo_tensorboard_logs_multi_kpi"
+DEFAULT_2KPI_LOG_DIR = os.path.join("results", "ppo_tensorboard_logs_2kpi")
+DEFAULT_MULTI_KPI_LOG_DIR = os.path.join("results", "ppo_tensorboard_logs_multi_kpi")
 
 def find_latest_event_file(log_dir):
     """Find the most recent event file in the given directory."""
@@ -215,7 +215,7 @@ def plot_kpi_metrics(log_dir, title_suffix=""):
     plt.tight_layout()
     return fig
 
-def save_plot(fig, filename, output_dir='plots'):
+def save_plot(fig, filename, output_dir=os.path.join('results', 'plots')):
     """Save the plot to a file."""
     os.makedirs(output_dir, exist_ok=True)
     filepath = os.path.join(output_dir, filename)
@@ -229,8 +229,8 @@ def main():
                        help=f'Directory containing 2-KPI TensorBoard logs (default: {DEFAULT_2KPI_LOG_DIR})')
     parser.add_argument('--log-dir-multi', type=str, default=DEFAULT_MULTI_KPI_LOG_DIR,
                        help=f'Directory containing multi-KPI TensorBoard logs (default: {DEFAULT_MULTI_KPI_LOG_DIR})')
-    parser.add_argument('--output-dir', type=str, default='training_plots',
-                       help='Directory to save output plots (default: training_plots)')
+    parser.add_argument('--output-dir', type=str, default=os.path.join('results', 'training_plots'),
+                       help='Directory to save output plots (default: results/training_plots)')
     parser.add_argument('--all-plots', action='store_true',
                        help='Generate all individual KPI plots in addition to the main comparison plot.')
     # The --compare flag is effectively removed as comparison is default.

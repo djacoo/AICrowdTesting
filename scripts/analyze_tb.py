@@ -28,8 +28,8 @@ def extract_scalar_data(event_file, scalar_keys):
 
 def main():
     log_dirs = {
-        "2KPI": "ppo_tensorboard_logs_2kpi",
-        "MultiKPI": "ppo_tensorboard_logs_multi_kpi"
+        "2KPI": os.path.join("results", "ppo_tensorboard_logs_2kpi"),
+        "MultiKPI": os.path.join("results", "ppo_tensorboard_logs_multi_kpi")
     }
 
     scalar_keys_to_extract = ["rollout/ep_rew_mean", "train/loss", "eval/mean_reward"]
