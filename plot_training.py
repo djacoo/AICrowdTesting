@@ -83,29 +83,73 @@ def plot_training_comparison(log_dirs, labels, metric='rollout/ep_rew_mean'):
     """
     plt.figure(figsize=(14, 8))
     
-    for log_dir, label in zip(log_dirs, labels):
+    colors = plt.cm.get_cmap('tab10', len(log_dirs)) # Get distinct colors
+
+    for i, (log_dir, label) in enumerate(zip(log_dirs, labels)):
         _, data = load_training_data(log_dir, [metric])
         if not data or metric not in data:
             print(f"Skipping {log_dir} - no data for {metric}")
             continue
             
         df = data[metric]
-        # Calculate moving average
-        window = max(1, len(df) // 20)
-        df[f'{metric}_ma'] = df[metric].rolling(window=window, min_periods=1).mean()
+        # Calculate moving average and standard deviation
+        window = max(1, len(df) // 20) # Ensure window is at least 1
+        if window == 0 and len(df) > 0: # Handle case where df is very short
+             window = len(df)
+        elif len(df) == 0:
+            print(f"Skipping {label} for metric {metric} due to empty dataframe.")
+            continue
+
+        df_ma = df[metric].rolling(window=window, min_periods=1).mean()
+        df_std = df[metric].rolling(window=window, min_periods=1).std()
         
         # Plot
-        plt.plot(df['step'], df[metric], alpha=0.2, label=f'{label} (raw)')
-        plt.plot(df['step'], df[f'{metric}_ma'], linewidth=2, 
+        plt.plot(df['step'], df[metric], alpha=0.15, color=colors(i), label=f'{label} (Raw)')
+        plt.plot(df['step'], df_ma, linewidth=2, color=colors(i),
                 label=f'{label} (MA {window} steps)')
+        plt.fill_between(df['step'], df_ma - df_std, df_ma + df_std, alpha=0.2, color=colors(i),
+                         label=f'{label} (Std Dev)')
     
     # Formatting
-    plt.title(f'Training Comparison: {metric}', fontsize=16, pad=20)
+    plt.title(f'Training Comparison: {metric} with ±1 Std Dev', fontsize=16, pad=20)
     plt.xlabel('Training Steps', fontsize=12)
     plt.ylabel('Metric Value', fontsize=12)
     plt.grid(True, alpha=0.3)
-    plt.legend()
     
+    # Improve legend to avoid duplicate labels from fill_between
+    handles, labels = plt.gca().get_legend_handles_labels()
+    unique_labels = {}
+    for handle, label in zip(handles, labels):
+        if "(Std Dev)" in label: # Keep raw and MA, but only one entry for Std Dev conceptually
+            base_label = label.replace(" (Std Dev)", "").replace(" (Raw)","").replace(f" (MA {window} steps)","").strip()
+            if base_label not in unique_labels or "(MA" in label : # Prioritize MA label or first entry
+                 unique_labels[base_label] = handle # This isn't perfect, but helps declutter
+        elif label not in unique_labels:
+            unique_labels[label] = handle
+
+    # Create a more organized legend for MA and Std Dev bands
+    # We want to show: Run1 (MA), Run1 (Std Dev), Run2 (MA), Run2 (Std Dev)
+    # The raw plot can be less prominent or optional if too cluttered.
+    # For simplicity, the current auto-generated legend might be acceptable,
+    # or a more complex legend handling is needed.
+    # The code above with unique_labels tries to simplify it a bit.
+
+    # For now, let's try a simpler approach to legend:
+    # Only show MA and one label for the shaded region.
+    # This requires careful label management in plot and fill_between.
+    # Re-creating handles/labels for clarity:
+
+    new_handles = []
+    new_labels = []
+    # Group labels by run name to combine MA and StdDev
+    # This is a bit tricky with how fill_between creates separate legend entries.
+    # A simpler way is to ensure fill_between does not add a new label if MA is already there for that color.
+
+    # Reset legend and add manually for better control if needed, or accept matplotlib's default.
+    # Given the current code, matplotlib will create three entries per run: Raw, MA, Std Dev.
+    # This is acceptable.
+    plt.legend()
+
     # Improve x-axis formatting
     plt.gca().xaxis.set_major_formatter(
         plt.FuncFormatter(lambda x, _: f'{int(x/1000)}k' if x >= 1000 else int(x))
@@ -187,61 +231,76 @@ def main():
                        help=f'Directory containing multi-KPI TensorBoard logs (default: {DEFAULT_MULTI_KPI_LOG_DIR})')
     parser.add_argument('--output-dir', type=str, default='training_plots',
                        help='Directory to save output plots (default: training_plots)')
-    parser.add_argument('--compare', action='store_true',
-                       help='Generate comparison plots between 2-KPI and multi-KPI training')
+    parser.add_argument('--all-plots', action='store_true',
+                       help='Generate all individual KPI plots in addition to the main comparison plot.')
+    # The --compare flag is effectively removed as comparison is default.
     args = parser.parse_args()
     
     os.makedirs(args.output_dir, exist_ok=True)
-    timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
-    
-    # Plot individual training runs
-    if os.path.exists(args.log_dir_2kpi):
+    # Using a fixed name for the primary comparison plot for easier access
+    # timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
+
+    log_dir_2kpi_exists = os.path.exists(args.log_dir_2kpi)
+    log_dir_multi_exists = os.path.exists(args.log_dir_multi)
+
+    if log_dir_2kpi_exists and log_dir_multi_exists:
         print("\n" + "="*50)
-        print("PLOTTING 2-KPI TRAINING METRICS")
+        print("GENERATING PRIMARY TRAINING COMPARISON PLOT")
         print("="*50)
-        fig = plot_kpi_metrics(args.log_dir_2kpi, "(2-KPI Training)")
-        if fig:
-            save_plot(fig, f"2kpi_metrics_{timestamp}.png", args.output_dir)
-    else:
-        print(f"\n2-KPI log directory not found: {args.log_dir_2kpi}")
-    
-    if os.path.exists(args.log_dir_multi):
-        print("\n" + "="*50)
-        print("PLOTTING MULTI-KPI TRAINING METRICS")
-        print("="*50)
-        fig = plot_kpi_metrics(args.log_dir_multi, "(Multi-KPI Training)")
-        if fig:
-            save_plot(fig, f"multi_kpi_metrics_{timestamp}.png", args.output_dir)
-    else:
-        print(f"\nMulti-KPI log directory not found: {args.log_dir_multi}")
-    
-    # Generate comparison plots if requested and both log directories exist
-    if args.compare and os.path.exists(args.log_dir_2kpi) and os.path.exists(args.log_dir_multi):
-        print("\n" + "="*50)
-        print("GENERATING COMPARISON PLOTS")
-        print("="*50)
-        
-        # Compare episode rewards
-        fig = plot_training_comparison(
+        fig_compare_rew = plot_training_comparison(
             [args.log_dir_2kpi, args.log_dir_multi],
             ['2-KPI', 'Multi-KPI'],
             'rollout/ep_rew_mean'
         )
-        save_plot(fig, f"reward_comparison_{timestamp}.png", args.output_dir)
+        if fig_compare_rew:
+            save_plot(fig_compare_rew, "training_comparison_with_std.png", args.output_dir)
+        else:
+            print("Could not generate primary comparison plot for rollout/ep_rew_mean.")
+
+        # Optionally, compare episode lengths if all_plots is not the main focus
+        # For now, focusing on the primary reward plot as per instructions.
+        # If you want to add ep_len_mean comparison by default:
+        # print("\n" + "="*50)
+        # print("GENERATING EPISODE LENGTH COMPARISON PLOT")
+        # print("="*50)
+        # fig_compare_len = plot_training_comparison(
+        #     [args.log_dir_2kpi, args.log_dir_multi],
+        #     ['2-KPI', 'Multi-KPI'],
+        #     'rollout/ep_len_mean'
+        # )
+        # if fig_compare_len:
+        #     save_plot(fig_compare_len, f"ep_len_comparison_with_std_{timestamp}.png", args.output_dir)
+        # else:
+        #     print("Could not generate episode length comparison plot.")
+
+    else:
+        print("\n" + "="*50)
+        print("SKIPPING COMPARISON PLOT: One or both log directories not found.")
+        print(f"2-KPI directory ({args.log_dir_2kpi}) found: {log_dir_2kpi_exists}")
+        print(f"Multi-KPI directory ({args.log_dir_multi}) found: {log_dir_multi_exists}")
+        print("="*50)
+
+    # Plot individual training runs if --all-plots is specified
+    if args.all_plots:
+        timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S') # Use timestamp for these optional plots
+        if log_dir_2kpi_exists:
+            print("\n" + "="*50)
+            print("PLOTTING INDIVIDUAL 2-KPI TRAINING METRICS")
+            print("="*50)
+            fig_2kpi = plot_kpi_metrics(args.log_dir_2kpi, "(2-KPI Training)")
+            if fig_2kpi:
+                save_plot(fig_2kpi, f"2kpi_metrics_{timestamp}.png", args.output_dir)
         
-        # Compare episode lengths if available
-        try:
-            fig = plot_training_comparison(
-                [args.log_dir_2kpi, args.log_dir_multi],
-                ['2-KPI', 'Multi-KPI'],
-                'rollout/ep_len_mean'
-            )
-            save_plot(fig, f"episode_length_comparison_{timestamp}.png", args.output_dir)
-        except:
-            print("Could not generate episode length comparison - data not available")
+        if log_dir_multi_exists:
+            print("\n" + "="*50)
+            print("PLOTTING INDIVIDUAL MULTI-KPI TRAINING METRICS")
+            print("="*50)
+            fig_multi = plot_kpi_metrics(args.log_dir_multi, "(Multi-KPI Training)")
+            if fig_multi:
+                save_plot(fig_multi, f"multi_kpi_metrics_{timestamp}.png", args.output_dir)
     
     print("\n" + "="*50)
-    print("PLOTTING COMPLETE")
+    print("PLOTTING SCRIPT EXECUTION COMPLETE")
     print("="*50)
     print(f"\nTo view the TensorBoard logs, run:")
     if os.path.exists(args.log_dir_2kpi):
