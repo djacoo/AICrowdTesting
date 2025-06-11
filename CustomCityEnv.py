@@ -7,6 +7,7 @@ and the AICrowdControl module for KPI calculation and reward scoring.
 The environment is designed for episodic rewards, where KPIs and scores are
 calculated at the end of each episode.
 """
+import time
 import gym
 from gym import spaces
 import numpy as np
@@ -141,6 +142,10 @@ class CustomCityEnv(gym.Env):
         self.current_timestep = 0
         self.current_step = 0  # Initialize current_step
         self.episode_length = timesteps_per_episode  # Initialize episode_length
+        
+        # Initialize random number generator
+        self.np_random = np.random.default_rng()
+        self._seed = None
 
         self.reward_calculator = ControlTrackReward(baseline=BASELINE_KPIS, phase=phase_weights)
         self.phase_weights = phase_weights # Store for direct access if needed
@@ -192,9 +197,17 @@ class CustomCityEnv(gym.Env):
         # Initialize observation vector with zeros
         obs = []
         
-        # Ensure data is available
-        if self.episode_data is None or self.current_timestep >= self.timesteps_per_episode:
-            print("Warning: _get_observation called with no data or at end of episode.")
+        # Ensure data is available and we're not at the end of the episode
+        if self.episode_data is None:
+            # If we're here during normal operation, it's a bug - log it but don't spam
+            if hasattr(self, '_last_warning') and (time.time() - self._last_warning) < 10:
+                return np.zeros(self.observation_space.shape, dtype=np.float32)
+            self._last_warning = time.time()
+            print(f"Warning: _get_observation called with no episode data at timestep {self.current_timestep}")
+            return np.zeros(self.observation_space.shape, dtype=np.float32)
+            
+        if self.current_timestep >= self.timesteps_per_episode:
+            # This is normal at the end of an episode, no need to warn
             return np.zeros(self.observation_space.shape, dtype=np.float32)
         
         # Track building-specific features
@@ -265,19 +278,27 @@ class CustomCityEnv(gym.Env):
         
         return np.array(obs, dtype=np.float32)
 
-    def reset(self):
+    def seed(self, seed=None):
+        """Sets the seed for this env's random number generator(s)."""
+        self._seed = seed
+        self.np_random = np.random.default_rng(seed)
+        return [seed]
+        
+    def reset(self, **kwargs):
         self.current_timestep = 0
         self.current_step = 0  # Reset current_step
         # Initialize or clear action history
         self.action_history = []
         
+        # Handle seed if provided in kwargs (for Gym compatibility)
+        if 'seed' in kwargs:
+            self.seed(kwargs['seed'])
+        
         # Generate new episode data
         self.episode_data = generate_dummy_environment_data(
-            self.timesteps_per_episode, 
-            self.num_buildings, 
-            self.timesteps_per_episode,
-            self.num_buildings
-            # Removed action=None, as it's no longer used by the new generator
+            num_timesteps=self.timesteps_per_episode,
+            num_buildings=self.num_buildings,
+            action=None
         )
         # Store a copy of the original (baseline) electricity consumption data
         # The 'e' from generate_dummy_environment_data is now the baseline.

@@ -509,10 +509,7 @@ def main_multi_kpi_training(num_buildings: int, timesteps_per_episode: int) -> P
         timesteps_per_episode=timesteps_per_episode
     )
     # Set environment seed for reproducibility
-    if hasattr(env_multi, 'np_random') and env_multi.np_random is not None:
-        env_multi.np_random.seed(SEED)
-    elif hasattr(env_multi, 'seed'):
-        env_multi.seed(SEED)
+    env_multi.seed(SEED)
     env_multi.reset()
 
     # --- Agent Training (Multi-KPIs) ---
@@ -777,10 +774,7 @@ def main_2kpi_training(num_buildings: int, timesteps_per_episode: int) -> PPO:
         timesteps_per_episode=timesteps_per_episode
     )
     # Set environment seed for reproducibility
-    if hasattr(env_2kpi, 'np_random') and env_2kpi.np_random is not None:
-        env_2kpi.np_random.seed(SEED)
-    elif hasattr(env_2kpi, 'seed'):
-        env_2kpi.seed(SEED)
+    env_2kpi.seed(SEED)
     env_2kpi.reset()
 
     # --- Agent Training (2-KPIs) ---
