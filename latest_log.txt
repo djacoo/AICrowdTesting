@@ -1,0 +1,1026 @@
+-----------------------------------------
+Step: 205000
+Last 100 episodes mean reward: 55.56
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 55.6     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+Step: 206000
+Last 100 episodes mean reward: 55.65
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 55.6     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 55.5     |
+| time/              |          |
+|    fps             | 701      |
+|    iterations      | 101      |
+|    time_elapsed    | 294      |
+|    total_timesteps | 206848   |
+---------------------------------
+Early stopping at step 9 due to reaching max kl: 0.02
+Step: 207000
+Last 100 episodes mean reward: 55.57
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 168         |
+|    ep_rew_mean          | 55.6        |
+| train/                  |             |
+|    approx_kl            | 0.013537401 |
+|    clip_fraction        | 0.0902      |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.97       |
+|    explained_variance   | 0.968       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 2.09        |
+|    n_updates            | 956         |
+|    policy_gradient_loss | -0.0154     |
+|    value_loss           | 4.51        |
+-----------------------------------------
+Step: 208000
+Last 100 episodes mean reward: 55.64
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 55.6     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 55.8     |
+| time/              |          |
+|    fps             | 702      |
+|    iterations      | 102      |
+|    time_elapsed    | 297      |
+|    total_timesteps | 208896   |
+---------------------------------
+Early stopping at step 1 due to reaching max kl: 0.02
+Step: 209000
+Last 100 episodes mean reward: 55.75
+------------------------------------------
+| rollout/                |              |
+|    ep_len_mean          | 168          |
+|    ep_rew_mean          | 55.7         |
+| train/                  |              |
+|    approx_kl            | 0.0137255415 |
+|    clip_fraction        | 0.0885       |
+|    clip_range           | 0.2          |
+|    clip_range_vf        | 0.2          |
+|    entropy_loss         | -0.98        |
+|    explained_variance   | 0.995        |
+|    learning_rate        | 0.00025      |
+|    loss                 | 0.4          |
+|    n_updates            | 958          |
+|    policy_gradient_loss | 0.00263      |
+|    value_loss           | 0.839        |
+------------------------------------------
+Eval num_timesteps=210000, episode_reward=54.24 +/- 1.20
+Episode length: 168.00 +/- 0.00
+---------------------------------
+| eval/              |          |
+|    mean_ep_length  | 168      |
+|    mean_reward     | 54.2     |
+| time/              |          |
+|    total_timesteps | 210000   |
+---------------------------------
+Step: 210000
+Last 100 episodes mean reward: 55.76
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 55.8     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 55.6     |
+| time/              |          |
+|    fps             | 704      |
+|    iterations      | 103      |
+|    time_elapsed    | 299      |
+|    total_timesteps | 210944   |
+---------------------------------
+Early stopping at step 5 due to reaching max kl: 0.02
+Step: 211000
+Last 100 episodes mean reward: 55.60
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 168         |
+|    ep_rew_mean          | 55.6        |
+| train/                  |             |
+|    approx_kl            | 0.015311587 |
+|    clip_fraction        | 0.0762      |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.973      |
+|    explained_variance   | 0.994       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.467       |
+|    n_updates            | 964         |
+|    policy_gradient_loss | -0.00712    |
+|    value_loss           | 0.954       |
+-----------------------------------------
+Step: 212000
+Last 100 episodes mean reward: 55.68
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 55.7     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 55.7     |
+| time/              |          |
+|    fps             | 706      |
+|    iterations      | 104      |
+|    time_elapsed    | 301      |
+|    total_timesteps | 212992   |
+---------------------------------
+Early stopping at step 6 due to reaching max kl: 0.02
+Step: 213000
+Last 100 episodes mean reward: 55.70
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 168         |
+|    ep_rew_mean          | 55.7        |
+| train/                  |             |
+|    approx_kl            | 0.014956738 |
+|    clip_fraction        | 0.112       |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.973      |
+|    explained_variance   | 0.989       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.623       |
+|    n_updates            | 971         |
+|    policy_gradient_loss | -0.0103     |
+|    value_loss           | 1.41        |
+-----------------------------------------
+Step: 214000
+Last 100 episodes mean reward: 55.67
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 55.7     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+Eval num_timesteps=215000, episode_reward=55.36 +/- 2.00
+Episode length: 168.00 +/- 0.00
+---------------------------------
+| eval/              |          |
+|    mean_ep_length  | 168      |
+|    mean_reward     | 55.4     |
+| time/              |          |
+|    total_timesteps | 215000   |
+---------------------------------
+Step: 215000
+Last 100 episodes mean reward: 55.66
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 55.7     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 55.6     |
+| time/              |          |
+|    fps             | 706      |
+|    iterations      | 105      |
+|    time_elapsed    | 304      |
+|    total_timesteps | 215040   |
+---------------------------------
+Step: 216000
+Last 100 episodes mean reward: 55.54
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 168         |
+|    ep_rew_mean          | 55.5        |
+| train/                  |             |
+|    approx_kl            | 0.011592023 |
+|    clip_fraction        | 0.0957      |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.972      |
+|    explained_variance   | 0.99        |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.666       |
+|    n_updates            | 981         |
+|    policy_gradient_loss | -0.0143     |
+|    value_loss           | 1.43        |
+-----------------------------------------
+Step: 217000
+Last 100 episodes mean reward: 55.36
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 55.4     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 55.3     |
+| time/              |          |
+|    fps             | 706      |
+|    iterations      | 106      |
+|    time_elapsed    | 307      |
+|    total_timesteps | 217088   |
+---------------------------------
+Step: 218000
+Last 100 episodes mean reward: 55.28
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 168         |
+|    ep_rew_mean          | 55.3        |
+| train/                  |             |
+|    approx_kl            | 0.013333254 |
+|    clip_fraction        | 0.101       |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.977      |
+|    explained_variance   | 0.992       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.518       |
+|    n_updates            | 991         |
+|    policy_gradient_loss | -0.018      |
+|    value_loss           | 1.1         |
+-----------------------------------------
+Step: 219000
+Last 100 episodes mean reward: 55.07
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 55.1     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 55.1     |
+| time/              |          |
+|    fps             | 706      |
+|    iterations      | 107      |
+|    time_elapsed    | 309      |
+|    total_timesteps | 219136   |
+---------------------------------
+Eval num_timesteps=220000, episode_reward=54.13 +/- 2.27
+Episode length: 168.00 +/- 0.00
+-----------------------------------------
+| eval/                   |             |
+|    mean_ep_length       | 168         |
+|    mean_reward          | 54.1        |
+| time/                   |             |
+|    total_timesteps      | 220000      |
+| train/                  |             |
+|    approx_kl            | 0.011688434 |
+|    clip_fraction        | 0.0689      |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.969      |
+|    explained_variance   | 0.985       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.907       |
+|    n_updates            | 1001        |
+|    policy_gradient_loss | -0.0135     |
+|    value_loss           | 2.05        |
+-----------------------------------------
+Step: 220000
+Last 100 episodes mean reward: 55.04
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 55       |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+Step: 221000
+Last 100 episodes mean reward: 54.96
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 55       |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 54.9     |
+| time/              |          |
+|    fps             | 706      |
+|    iterations      | 108      |
+|    time_elapsed    | 313      |
+|    total_timesteps | 221184   |
+---------------------------------
+Early stopping at step 8 due to reaching max kl: 0.02
+Step: 222000
+Last 100 episodes mean reward: 54.85
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 168         |
+|    ep_rew_mean          | 54.9        |
+| train/                  |             |
+|    approx_kl            | 0.013943035 |
+|    clip_fraction        | 0.0823      |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.997      |
+|    explained_variance   | 0.986       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.976       |
+|    n_updates            | 1010        |
+|    policy_gradient_loss | -0.0151     |
+|    value_loss           | 1.86        |
+-----------------------------------------
+Step: 223000
+Last 100 episodes mean reward: 54.78
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 54.8     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 54.7     |
+| time/              |          |
+|    fps             | 706      |
+|    iterations      | 109      |
+|    time_elapsed    | 315      |
+|    total_timesteps | 223232   |
+---------------------------------
+Early stopping at step 8 due to reaching max kl: 0.02
+Step: 224000
+Last 100 episodes mean reward: 54.66
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 168         |
+|    ep_rew_mean          | 54.7        |
+| train/                  |             |
+|    approx_kl            | 0.014427319 |
+|    clip_fraction        | 0.105       |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.99       |
+|    explained_variance   | 0.988       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.766       |
+|    n_updates            | 1019        |
+|    policy_gradient_loss | -0.0135     |
+|    value_loss           | 1.62        |
+-----------------------------------------
+Eval num_timesteps=225000, episode_reward=51.94 +/- 1.99
+Episode length: 168.00 +/- 0.00
+---------------------------------
+| eval/              |          |
+|    mean_ep_length  | 168      |
+|    mean_reward     | 51.9     |
+| time/              |          |
+|    total_timesteps | 225000   |
+---------------------------------
+Step: 225000
+Last 100 episodes mean reward: 54.37
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 54.4     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 54.3     |
+| time/              |          |
+|    fps             | 706      |
+|    iterations      | 110      |
+|    time_elapsed    | 318      |
+|    total_timesteps | 225280   |
+---------------------------------
+Step: 226000
+Last 100 episodes mean reward: 54.20
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 168         |
+|    ep_rew_mean          | 54.2        |
+| train/                  |             |
+|    approx_kl            | 0.009457778 |
+|    clip_fraction        | 0.0812      |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.992      |
+|    explained_variance   | 0.989       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.743       |
+|    n_updates            | 1029        |
+|    policy_gradient_loss | -0.014      |
+|    value_loss           | 1.55        |
+-----------------------------------------
+Step: 227000
+Last 100 episodes mean reward: 54.04
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 54       |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 54.1     |
+| time/              |          |
+|    fps             | 706      |
+|    iterations      | 111      |
+|    time_elapsed    | 321      |
+|    total_timesteps | 227328   |
+---------------------------------
+Step: 228000
+Last 100 episodes mean reward: 53.97
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 168         |
+|    ep_rew_mean          | 54          |
+| train/                  |             |
+|    approx_kl            | 0.013294036 |
+|    clip_fraction        | 0.107       |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.988      |
+|    explained_variance   | 0.991       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.474       |
+|    n_updates            | 1039        |
+|    policy_gradient_loss | -0.0151     |
+|    value_loss           | 1.2         |
+-----------------------------------------
+Step: 229000
+Last 100 episodes mean reward: 53.89
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 53.9     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 53.9     |
+| time/              |          |
+|    fps             | 706      |
+|    iterations      | 112      |
+|    time_elapsed    | 324      |
+|    total_timesteps | 229376   |
+---------------------------------
+Early stopping at step 9 due to reaching max kl: 0.02
+Eval num_timesteps=230000, episode_reward=51.44 +/- 1.77
+Episode length: 168.00 +/- 0.00
+-----------------------------------------
+| eval/                   |             |
+|    mean_ep_length       | 168         |
+|    mean_reward          | 51.4        |
+| time/                   |             |
+|    total_timesteps      | 230000      |
+| train/                  |             |
+|    approx_kl            | 0.015201143 |
+|    clip_fraction        | 0.0917      |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.99       |
+|    explained_variance   | 0.989       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.723       |
+|    n_updates            | 1049        |
+|    policy_gradient_loss | -0.016      |
+|    value_loss           | 1.47        |
+-----------------------------------------
+Step: 230000
+Last 100 episodes mean reward: 53.93
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 53.9     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+Step: 231000
+Last 100 episodes mean reward: 53.87
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 53.9     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 53.8     |
+| time/              |          |
+|    fps             | 706      |
+|    iterations      | 113      |
+|    time_elapsed    | 327      |
+|    total_timesteps | 231424   |
+---------------------------------
+Early stopping at step 7 due to reaching max kl: 0.02
+Step: 232000
+Last 100 episodes mean reward: 53.91
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 168         |
+|    ep_rew_mean          | 53.9        |
+| train/                  |             |
+|    approx_kl            | 0.012137878 |
+|    clip_fraction        | 0.1         |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.951      |
+|    explained_variance   | 0.982       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 1.28        |
+|    n_updates            | 1057        |
+|    policy_gradient_loss | -0.0126     |
+|    value_loss           | 2.53        |
+-----------------------------------------
+Step: 233000
+Last 100 episodes mean reward: 53.91
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 53.9     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 53.9     |
+| time/              |          |
+|    fps             | 707      |
+|    iterations      | 114      |
+|    time_elapsed    | 330      |
+|    total_timesteps | 233472   |
+---------------------------------
+Early stopping at step 1 due to reaching max kl: 0.02
+Step: 234000
+Last 100 episodes mean reward: 53.90
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 168         |
+|    ep_rew_mean          | 53.9        |
+| train/                  |             |
+|    approx_kl            | 0.013486406 |
+|    clip_fraction        | 0.0661      |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.954      |
+|    explained_variance   | 0.991       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.479       |
+|    n_updates            | 1059        |
+|    policy_gradient_loss | -0.000651   |
+|    value_loss           | 1.32        |
+-----------------------------------------
+Eval num_timesteps=235000, episode_reward=54.85 +/- 1.92
+Episode length: 168.00 +/- 0.00
+---------------------------------
+| eval/              |          |
+|    mean_ep_length  | 168      |
+|    mean_reward     | 54.9     |
+| time/              |          |
+|    total_timesteps | 235000   |
+---------------------------------
+Step: 235000
+Last 100 episodes mean reward: 53.87
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 53.9     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 53.8     |
+| time/              |          |
+|    fps             | 709      |
+|    iterations      | 115      |
+|    time_elapsed    | 332      |
+|    total_timesteps | 235520   |
+---------------------------------
+Step: 236000
+Last 100 episodes mean reward: 53.87
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 168         |
+|    ep_rew_mean          | 53.9        |
+| train/                  |             |
+|    approx_kl            | 0.010564824 |
+|    clip_fraction        | 0.0775      |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.942      |
+|    explained_variance   | 0.992       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.538       |
+|    n_updates            | 1069        |
+|    policy_gradient_loss | -0.0119     |
+|    value_loss           | 1.16        |
+-----------------------------------------
+Step: 237000
+Last 100 episodes mean reward: 53.90
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 53.9     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 54       |
+| time/              |          |
+|    fps             | 709      |
+|    iterations      | 116      |
+|    time_elapsed    | 334      |
+|    total_timesteps | 237568   |
+---------------------------------
+Step: 238000
+Last 100 episodes mean reward: 53.86
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 168         |
+|    ep_rew_mean          | 53.9        |
+| train/                  |             |
+|    approx_kl            | 0.009707188 |
+|    clip_fraction        | 0.0611      |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.95       |
+|    explained_variance   | 0.989       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.82        |
+|    n_updates            | 1079        |
+|    policy_gradient_loss | -0.0138     |
+|    value_loss           | 1.66        |
+-----------------------------------------
+Step: 239000
+Last 100 episodes mean reward: 53.96
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 54       |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 53.8     |
+| time/              |          |
+|    fps             | 709      |
+|    iterations      | 117      |
+|    time_elapsed    | 337      |
+|    total_timesteps | 239616   |
+---------------------------------
+Eval num_timesteps=240000, episode_reward=52.87 +/- 1.85
+Episode length: 168.00 +/- 0.00
+-----------------------------------------
+| eval/                   |             |
+|    mean_ep_length       | 168         |
+|    mean_reward          | 52.9        |
+| time/                   |             |
+|    total_timesteps      | 240000      |
+| train/                  |             |
+|    approx_kl            | 0.010272572 |
+|    clip_fraction        | 0.0773      |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.947      |
+|    explained_variance   | 0.992       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.67        |
+|    n_updates            | 1089        |
+|    policy_gradient_loss | -0.0149     |
+|    value_loss           | 1.2         |
+-----------------------------------------
+Step: 240000
+Last 100 episodes mean reward: 53.90
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 53.9     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+Step: 241000
+Last 100 episodes mean reward: 54.01
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 54       |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 54.1     |
+| time/              |          |
+|    fps             | 708      |
+|    iterations      | 118      |
+|    time_elapsed    | 341      |
+|    total_timesteps | 241664   |
+---------------------------------
+Step: 242000
+Last 100 episodes mean reward: 54.16
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 168         |
+|    ep_rew_mean          | 54.2        |
+| train/                  |             |
+|    approx_kl            | 0.013116023 |
+|    clip_fraction        | 0.0918      |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.961      |
+|    explained_variance   | 0.985       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.997       |
+|    n_updates            | 1099        |
+|    policy_gradient_loss | -0.0193     |
+|    value_loss           | 2.12        |
+-----------------------------------------
+Step: 243000
+Last 100 episodes mean reward: 54.41
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 54.4     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 54.4     |
+| time/              |          |
+|    fps             | 708      |
+|    iterations      | 119      |
+|    time_elapsed    | 343      |
+|    total_timesteps | 243712   |
+---------------------------------
+Early stopping at step 9 due to reaching max kl: 0.02
+Step: 244000
+Last 100 episodes mean reward: 54.49
+----------------------------------------
+| rollout/                |            |
+|    ep_len_mean          | 168        |
+|    ep_rew_mean          | 54.5       |
+| train/                  |            |
+|    approx_kl            | 0.01571553 |
+|    clip_fraction        | 0.106      |
+|    clip_range           | 0.2        |
+|    clip_range_vf        | 0.2        |
+|    entropy_loss         | -0.966     |
+|    explained_variance   | 0.969      |
+|    learning_rate        | 0.00025    |
+|    loss                 | 2.46       |
+|    n_updates            | 1109       |
+|    policy_gradient_loss | -0.019     |
+|    value_loss           | 4.63       |
+----------------------------------------
+Eval num_timesteps=245000, episode_reward=54.08 +/- 1.87
+Episode length: 168.00 +/- 0.00
+---------------------------------
+| eval/              |          |
+|    mean_ep_length  | 168      |
+|    mean_reward     | 54.1     |
+| time/              |          |
+|    total_timesteps | 245000   |
+---------------------------------
+Step: 245000
+Last 100 episodes mean reward: 54.69
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 54.7     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 54.8     |
+| time/              |          |
+|    fps             | 707      |
+|    iterations      | 120      |
+|    time_elapsed    | 347      |
+|    total_timesteps | 245760   |
+---------------------------------
+Step: 246000
+Last 100 episodes mean reward: 54.85
+----------------------------------------
+| rollout/                |            |
+|    ep_len_mean          | 168        |
+|    ep_rew_mean          | 54.9       |
+| train/                  |            |
+|    approx_kl            | 0.01099532 |
+|    clip_fraction        | 0.113      |
+|    clip_range           | 0.2        |
+|    clip_range_vf        | 0.2        |
+|    entropy_loss         | -0.957     |
+|    explained_variance   | 0.991      |
+|    learning_rate        | 0.00025    |
+|    loss                 | 0.577      |
+|    n_updates            | 1119       |
+|    policy_gradient_loss | -0.0162    |
+|    value_loss           | 1.32       |
+----------------------------------------
+Step: 247000
+Last 100 episodes mean reward: 54.93
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 54.9     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 55       |
+| time/              |          |
+|    fps             | 707      |
+|    iterations      | 121      |
+|    time_elapsed    | 350      |
+|    total_timesteps | 247808   |
+---------------------------------
+Step: 248000
+Last 100 episodes mean reward: 55.07
+-----------------------------------------
+| rollout/                |             |
+|    ep_len_mean          | 168         |
+|    ep_rew_mean          | 55.1        |
+| train/                  |             |
+|    approx_kl            | 0.008495038 |
+|    clip_fraction        | 0.0634      |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.948      |
+|    explained_variance   | 0.995       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.327       |
+|    n_updates            | 1129        |
+|    policy_gradient_loss | -0.012      |
+|    value_loss           | 0.801       |
+-----------------------------------------
+Step: 249000
+Last 100 episodes mean reward: 55.00
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 55       |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 55.2     |
+| time/              |          |
+|    fps             | 707      |
+|    iterations      | 122      |
+|    time_elapsed    | 353      |
+|    total_timesteps | 249856   |
+---------------------------------
+Eval num_timesteps=250000, episode_reward=54.71 +/- 2.84
+Episode length: 168.00 +/- 0.00
+-----------------------------------------
+| eval/                   |             |
+|    mean_ep_length       | 168         |
+|    mean_reward          | 54.7        |
+| time/                   |             |
+|    total_timesteps      | 250000      |
+| train/                  |             |
+|    approx_kl            | 0.011011012 |
+|    clip_fraction        | 0.0909      |
+|    clip_range           | 0.2         |
+|    clip_range_vf        | 0.2         |
+|    entropy_loss         | -0.955      |
+|    explained_variance   | 0.992       |
+|    learning_rate        | 0.00025     |
+|    loss                 | 0.426       |
+|    n_updates            | 1139        |
+|    policy_gradient_loss | -0.014      |
+|    value_loss           | 1.19        |
+-----------------------------------------
+Step: 250000
+Last 100 episodes mean reward: 55.25
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 55.3     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+Step: 251000
+Last 100 episodes mean reward: 55.35
+-------------------------------
+| rollout/         |          |
+|    ep_len_mean   | 168      |
+|    ep_rew_mean   | 55.4     |
+| train/           |          |
+|    clip_range    | 0.2      |
+|    learning_rate | 0.00025  |
+-------------------------------
+---------------------------------
+| rollout/           |          |
+|    ep_len_mean     | 168      |
+|    ep_rew_mean     | 55.4     |
+| time/              |          |
+|    fps             | 706      |
+|    iterations      | 123      |
+|    time_elapsed    | 356      |
+|    total_timesteps | 251904   |
+---------------------------------
+Early stopping at step 8 due to reaching max kl: 0.02
+Training progress: 251904it [05:57, 704.26it/s] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 251,757/250,000  [ 0:05:55 < 0:00:00 , 730 it/s ]
+ 100% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 251,904/250,000  [ 0:05:55 < 0:00:00 , 706 it/s ]
+Multi-KPI Training finished. Saving model to models/ppo_multi_kpi_model ...
+
+=== Evaluating Trained Policy ===
+
+=== Training Summary ===
+Initial Average Reward (Random Policy): 52.33
+Final Average Reward (Trained Policy): 54.37
+Improvement: +3.90%
+=====================
+
+Multi-KPI Training complete! Model saved to models/ppo_multi_kpi_model
+
+Evaluation Results (5 episodes):
+Mean Reward: 54.56 ± 2.06
+Multi-KPI Training finished. Model saved to models/ppo_multi_kpi_model.zip
+
+==================================================
+TRAINING COMPLETE
+==================================================
+
+All training phases complete.
