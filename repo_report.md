@@ -30,15 +30,15 @@ Reward computation is handled by `ControlTrackReward` in `src/citylearn_rl/rewar
 
 ### KPI Definitions
 - **Carbon Emissions:**
-  \( G = \frac{1}{N} \sum_{i=1}^{N} \sum_{t=1}^{T} e_{i,t} \cdot c_t \)
+  $\( G = \frac{1}{N} \sum_{i=1}^{N} \sum_{t=1}^{T} e_{i,t} \cdot c_t \)$
 - **Thermal Comfort:**
-  \( U = \frac{1}{N} \sum_{i=1}^{N} \sum_{t=1}^{T} \mathbb{1}(|T_{i,t}-S_{i,t}|>B) \cdot \mathbb{1}(O_{i,t}>0) \)
+  $\( U = \frac{1}{N} \sum_{i=1}^{N} \sum_{t=1}^{T} \mathbb{1}(|T_{i,t}-S_{i,t}|>B) \cdot \mathbb{1}(O_{i,t}>0) \)$
 - **Grid Metrics:** ramping, load factor (1-load_factor), daily peak and all-time peak.
 - **Resilience Metrics:** thermal resilience fraction and unserved energy fraction.
 
 ### Final Score
 The overall score is
-\[ score = w_1 S_{\text{comfort}} + w_2 S_{\text{emissions}} + w_3 S_{\text{grid}} + w_4 S_{\text{resilience}} \]
+$\[ score = w_1 S_{\text{comfort}} + w_2 S_{\text{emissions}} + w_3 S_{\text{grid}} + w_4 S_{\text{resilience}} \]$
 where each component score is normalized against `BASELINE_KPIS`.
 
 `PhaseWeights` provide two standard configurations:
