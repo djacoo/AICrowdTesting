@@ -109,6 +109,7 @@ class CustomCityEnv(gym.Env):
         )
 
         self.episode_data = None # To store data for the current episode
+        self.original_e_episode_array = None # To store original e data for consistent action effects
 
     def _get_observation(self):
         """Construct observation vector with enhanced state information.
@@ -135,15 +136,27 @@ class CustomCityEnv(gym.Env):
             current_temp = self.episode_data['temp'][self.current_timestep, b]
             
             # Add normalized features
-            obs.append(current_e / 100.0)  # Normalized consumption (assuming max 100 kW)
-            obs.append((current_temp - 15.0) / 10.0)  # Normalized temperature around 20°C
+            # Max 'e' is ABSOLUTE_MAX_E_PER_BUILDING (e.g. 100.0) due to clipping in step().
+            # Scaling by ABSOLUTE_MAX_E_PER_BUILDING.
+            # Define ABSOLUTE_MAX_E_PER_BUILDING, e.g. 100.0, consistent with step() method's clipping
+            ABSOLUTE_MAX_E_PER_BUILDING = 100.0
+            norm_current_e = current_e / ABSOLUTE_MAX_E_PER_BUILDING
+            obs.append(norm_current_e)
             
-            # Add short-term trends (difference from previous timestep)
+            # Temp is [15, 25]. (temp - 15) / 10 gives [0, 1].
+            norm_current_temp = (current_temp - 15.0) / 10.0
+            obs.append(norm_current_temp)
+
+            # Add short-term trends (difference from previous normalized timestep)
             if self.current_timestep > 0:
                 prev_e = self.episode_data['e'][self.current_timestep-1, b]
                 prev_temp = self.episode_data['temp'][self.current_timestep-1, b]
-                obs.append((current_e - prev_e) / 10.0)  # Consumption trend
-                obs.append((current_temp - prev_temp) / 5.0)  # Temperature trend
+
+                norm_prev_e = prev_e / ABSOLUTE_MAX_E_PER_BUILDING
+                obs.append(norm_current_e - norm_prev_e)  # Consumption trend will be roughly [-1, 1]
+
+                norm_prev_temp = (prev_temp - 15.0) / 10.0
+                obs.append(norm_current_temp - norm_prev_temp)  # Temperature trend will be roughly [-1, 1]
             else:
                 obs.extend([0.0, 0.0])  # No trend data for first step
         
@@ -152,8 +165,14 @@ class CustomCityEnv(gym.Env):
         emission_rate = self.episode_data['emission_rate'][self.current_timestep]
         outage = self.episode_data['outage_timesteps'][self.current_timestep]
         
-        obs.append(district_consumption / 1000.0)  # Normalized district consumption
-        obs.append(emission_rate / 1000.0)  # Normalized emission rate
+        # District consumption: sum of individual 'e' values. Max num_buildings * ABSOLUTE_MAX_E_PER_BUILDING
+        # Define ABSOLUTE_MAX_E_PER_BUILDING, e.g. 100.0, consistent with step() method's clipping
+        ABSOLUTE_MAX_E_PER_BUILDING = 100.0
+        max_district_consumption = self.num_buildings * ABSOLUTE_MAX_E_PER_BUILDING
+        obs.append(district_consumption / max_district_consumption if max_district_consumption > 0 else 0.0)
+
+        # Emission rate is [0.1, 0.6]. Dividing by 0.6 gives [0.166, 1].
+        obs.append(emission_rate / 0.6)
         obs.append(1.0 if outage else 0.0)  # Binary outage flag
         
         # Time features
@@ -187,13 +206,8 @@ class CustomCityEnv(gym.Env):
             self.num_buildings, 
             action=None
         )
-        
-        # Generate new episode data
-        self.episode_data = generate_dummy_environment_data(
-            self.timesteps_per_episode, 
-            self.num_buildings, 
-            action=None
-        )
+        # Store a copy of the original electricity consumption data
+        self.original_e_episode_array = self.episode_data['e'].copy()
         
         # Get initial observation
         obs = self._get_observation()
@@ -234,19 +248,37 @@ class CustomCityEnv(gym.Env):
             4: 1.8    # Very high (80% increase)
         }[action]
         
-        # Apply action effect to the current timestep's consumption
-        if 'e' in self.episode_data and self.current_timestep < self.timesteps_per_episode:
-            # Apply action effect to electricity consumption for all buildings
-            self.episode_data['e'][self.current_timestep] *= action_effect
+        # Define absolute min/max for consumption per building
+        ABSOLUTE_MIN_E_PER_BUILDING = 1.0
+        ABSOLUTE_MAX_E_PER_BUILDING = 100.0
+
+        # Apply action effect to the current timestep's consumption based on original data
+        if self.original_e_episode_array is not None and \
+           'e' in self.episode_data and \
+           self.current_timestep < self.timesteps_per_episode:
             
-            # Ensure consumption stays within reasonable but wider bounds
-            self.episode_data['e'][self.current_timestep] = np.clip(
-                self.episode_data['e'][self.current_timestep],
-                0.3,  # Minimum 30% of original consumption (less extreme minimum)
-                2.5   # Maximum 250% of original consumption (wider range)
-            )
+            # Get base consumption from the original data for the current timestep
+            base_consumption_t = self.original_e_episode_array[self.current_timestep].copy() # Ensure it's an array for per-building
+
+            # Apply action effect
+            modified_consumption_t = base_consumption_t * action_effect
             
-            # Update district consumption
+            # Clip the modified consumption to absolute limits
+            # Ensure clipping is done per building if modified_consumption_t is an array
+            if isinstance(modified_consumption_t, np.ndarray):
+                self.episode_data['e'][self.current_timestep] = np.clip(
+                    modified_consumption_t,
+                    ABSOLUTE_MIN_E_PER_BUILDING,
+                    ABSOLUTE_MAX_E_PER_BUILDING
+                )
+            else: # Should be an array if num_buildings > 1, but as a fallback for num_buildings = 1
+                 self.episode_data['e'][self.current_timestep, 0] = np.clip(
+                    modified_consumption_t, # This assumes modified_consumption_t is scalar if not ndarray
+                    ABSOLUTE_MIN_E_PER_BUILDING,
+                    ABSOLUTE_MAX_E_PER_BUILDING
+                )
+
+            # Update district consumption based on the newly modified 'e' values
             if 'district_consumption' in self.episode_data:
                 self.episode_data['district_consumption'][self.current_timestep] = np.sum(
                     self.episode_data['e'][self.current_timestep]
@@ -269,76 +301,59 @@ class CustomCityEnv(gym.Env):
                 # Get individual KPI components
                 emissions = raw_kpis.get('carbon_emissions', 1000)
                 unmet_hours = raw_kpis.get('unmet_hours', 1.0)
+                # Other KPIs can be kept for info if needed
                 ramping = raw_kpis.get('ramping', 0)
                 load_factor = raw_kpis.get('load_factor', 0)
                 peaks = raw_kpis.get('peaks', 0)
                 resilience = raw_kpis.get('resilience', 0)
+
+                # 1. Calculate base scores
+                # Comfort score: 1 is best (no unmet hours), 0 is worst (1 or more unmet hours ratio)
+                comfort_score = 1.0 - min(1.0, unmet_hours)
                 
-                # 1. Enhanced base scores with better scaling
-                comfort_norm = 1.0 - min(1.0, unmet_hours)
-                
-                # 2. Improved scoring with dynamic scaling
-                # Comfort score - smoother gradient with square root
-                comfort_score = np.sqrt(comfort_norm)  # Softer gradient for better learning
-                
-                # Emissions score - more aggressive log scaling
-                emissions_norm = 1.0 / (1.0 + np.log1p(emissions / 30.0))  # More sensitive to emissions
-                emissions_score = 1.8 / (1.0 + np.exp(-4.0 * (emissions_norm - 0.6)))  # Steeper sigmoid
-                
-                # 3. Dynamic progress-based scaling
-                progress = min(1.0, self.current_step / self.episode_length)
-                # More aggressive exploration early, tighter later
-                progress_factor = 0.6 + 0.8 * (1.0 - np.exp(-3.0 * progress))  # Smoother progression
-                
-                # 4. Enhanced base reward with stronger weighting on comfort
-                temperature = 0.6 + 0.4 * progress  # More aggressive temperature scaling
-                base_reward = 120.0 * (
-                    (0.7 * comfort_score + 0.3 * emissions_score) ** (1.0/max(0.1, temperature))
-                )
-                
-                # 5. More aggressive performance bonuses with progressive thresholds
+                # Emissions score: Scaled to be higher for lower emissions.
+                # Using a simple inverse relationship, normalized. Max emissions could be e.g. 2000 to make score 0.
+                # Let's aim for a score between 0 and 1.
+                # If baseline emissions are X, and we achieve Y, score is roughly X/Y.
+                # Let's use a simpler normalization: e.g. baseline_emissions / (baseline_emissions + current_emissions)
+                # Or, more directly, 1 / (1 + normalized_emissions).
+                # Assuming emissions around a few hundreds to a thousand.
+                # Let's try: 1 - (emissions / (BASELINE_KPIS.get('carbon_emissions', 1000) * 2))
+                # This makes emissions_score = 0.5 if current emissions = baseline, 1 if emissions = 0, 0 if emissions = 2*baseline
+                baseline_emissions_kpi = BASELINE_KPIS.get('carbon_emissions', 1000) # Default if not in BASELINE_KPIS
+                emissions_score = np.clip(1.0 - (emissions / (baseline_emissions_kpi * 2.0)), 0.0, 1.0)
+
+                # 2. Calculate base_reward (focused on comfort and emissions)
+                # Simple weighted average, scaled.
+                # Weights can be adjusted, e.g., 0.7 for comfort, 0.3 for emissions.
+                base_reward = 100.0 * (0.7 * comfort_score + 0.3 * emissions_score)
+
+                # 3. Define comfort_bonus and emissions_bonus (simpler calculation)
+                # Bonus if scores exceed a certain threshold, e.g., 0.8
                 comfort_bonus = 0.0
-                comfort_threshold = 0.6 + 0.3 * progress  # More gradual threshold increase
-                if comfort_score > comfort_threshold:
-                    comfort_bonus = 50.0 * ((comfort_score - comfort_threshold) ** 1.5)  # Stronger bonus
-                
+                if comfort_score > 0.8:
+                    comfort_bonus = 20.0 * (comfort_score - 0.8) # Linear bonus
+
                 emissions_bonus = 0.0
-                emissions_threshold = 0.65 + 0.25 * progress  # More accessible threshold
-                if emissions_score > emissions_threshold:
-                    emissions_bonus = 40.0 * ((emissions_score - emissions_threshold) ** 1.5)  # Stronger bonus
+                if emissions_score > 0.8:
+                    emissions_bonus = 20.0 * (emissions_score - 0.8) # Linear bonus
                 
-                # 6. Progress-based rewards with increasing impact
-                progress_bonus = 10.0 * (progress ** 1.5)  # More aggressive progress reward
-                
-                # 7. Enhanced terminal bonus for good performance
-                terminal_bonus = 0.0
-                if done and progress >= 0.9:  # Slightly lower threshold
-                    performance = (0.65 * comfort_score + 0.35 * emissions_score)  # Slight preference for comfort
-                    if performance > 0.8:  # Lower threshold for terminal bonus
-                        terminal_bonus = 80.0 * (performance ** 2.5)  # Much stronger terminal bonus
-                
-                # 8. Action consistency (slightly higher penalty for erratic behavior)
+                # 4. Action penalty (optional, can be kept simple)
                 action_penalty = 0.0
-                if hasattr(self, 'last_action') and action is not None and hasattr(self, 'action_history') and len(self.action_history) > 0:
-                    action_change = abs(action - self.last_action) / 4.0
-                    action_penalty = 2.0 * (action_change ** 1.5)
+                if hasattr(self, 'last_action') and action is not None and hasattr(self, 'action_history') and len(self.action_history) > 1:
+                    # Penalize frequent changes if last_action is defined
+                    action_change = abs(action - self.action_history[-2]) / (self.action_space.n -1) # Normalize by action space size
+                    action_penalty = 5.0 * action_change # Small penalty for action changes
                 
-                # 9. Combine all components with weights
-                reward = (
-                    base_reward * 0.7 +  # Base reward is most important
-                    comfort_bonus * 0.5 +
-                    emissions_bonus * 0.5 +
-                    progress_bonus * 0.3 +
-                    terminal_bonus * 0.5 -
-                    action_penalty
-                )
+                # 5. Combine components
+                # Removed progress_bonus, terminal_bonus, progress_factor, temperature, reward_scale
+                reward = base_reward + comfort_bonus + emissions_bonus - action_penalty
                 
-                # 10. Dynamic reward scaling based on progress (less aggressive)
-                reward_scale = 1.0 + (0.5 * progress)
-                reward *= reward_scale
-                
-                # 11. Clip to reasonable range
-                reward = np.clip(reward, -50.0, 200.0)  # Lower ceiling, higher floor for penalties
+                # 6. Clip to a revised range if necessary.
+                # Given the new calculation, max possible (approx): 100 (base) + 20*0.2 (comfort) + 20*0.2 (emissions) = 108
+                # Min possible (approx): 0 (base, bonuses) - 5 (penalty) = -5
+                # Let's set a range like -10 to 110.
+                reward = np.clip(reward, -10.0, 110.0)
                 
                 # Store detailed info for analysis
                 info = {
@@ -347,70 +362,65 @@ class CustomCityEnv(gym.Env):
                     'emissions_score': emissions_score,
                     'carbon_emissions': emissions,
                     'unmet_hours': unmet_hours,
+                    'base_reward_calculated': base_reward,
+                    'comfort_bonus_calculated': comfort_bonus,
+                    'emissions_bonus_calculated': emissions_bonus,
+                    'action_penalty_calculated': action_penalty,
+                    'final_reward_before_clip': base_reward + comfort_bonus + emissions_bonus - action_penalty,
+                    # Keep other KPIs for logging if needed
                     'ramping': ramping,
                     'load_factor': load_factor,
                     'peaks': peaks,
-                    'resilience': resilience,
-                    'reward_components': {
-                        'comfort': comfort_score,
-                        'emissions': emissions_score,
-                        'ramping': 1.0 - min(1.0, ramping / 50.0),
-                        'load_factor': load_factor,
-                        'peaks': 1.0 - min(1.0, peaks / 100.0)
-                    }
+                    'resilience': resilience
                 }
                 
             except Exception as e:
                 print(f"Error calculating KPIs/reward at end of episode: {e}")
-                reward = -5.0  # Significant penalty for failure
+                reward = -10.0  # Penalty for failure, consistent with new clip range
                 info = {'error': str(e)}
                 
+            # For the terminal state, the observation is typically not used by SB3,
+            # but providing a zero vector is a common practice.
             observation = np.zeros(self.observation_space.shape, dtype=np.float32)
         else:
-            # Calculate a small intermediate reward based on current state
-            # This helps guide the learning process
+            # Intermediate reward: simple, based on current comfort and emissions scores
+            reward = 0.0 # Default to 0 for intermediate steps
             try:
-                # Get current timestep data
-                current_data = {k: v[:self.current_timestep+1] for k, v in self.episode_data.items() 
-                              if isinstance(v, (list, np.ndarray)) and len(v) > self.current_timestep}
+                # Use only the current timestep's data for a less complex intermediate signal
+                # This requires properties of episode_data to be sliceable up to current_timestep
                 
-                # Calculate intermediate KPIs for the current episode segment
-                raw_kpis = self.reward_calculator.get_all_kpi_values(current_data)
+                # For a very simple intermediate reward, we might not even calculate full KPIs
+                # but use proxies from the current observation or very recent data.
+                # However, to keep it somewhat aligned with final goals:
                 
-                # Intermediate reward with better shaping
-                comfort_score = 1.0 - min(1.0, raw_kpis.get('unmet_hours', 1.0))
-                emissions = raw_kpis.get('carbon_emissions', 1000)
-                emissions_score = np.exp(-emissions / 500.0)
+                # Let's get current 'unmet_hours' and 'carbon_emissions' if possible,
+                # or proxies. The observation itself contains normalized values that could be used.
+                # For simplicity, let's assume we can get a rough idea of current comfort/emissions.
                 
-                # Calculate base reward components
-                reward_components = {
-                    'comfort': 0.6 * comfort_score,
-                    'emissions': 0.4 * emissions_score
-                }
+                # Simplified: Use a proxy for comfort and emissions from current step data if available
+                # This is a placeholder; a robust implementation might need more careful KPI calculation
+                # or rely on values that are updated incrementally.
                 
-                # Calculate base reward
-                reward = sum(reward_components.values())
-                
-                # Add exploration bonus (decaying with time)
-                if not hasattr(self, 'last_action'):
-                    self.last_action = action
-                    self.exploration_bonus = 0.1
-                else:
-                    # Decaying exploration bonus
-                    self.exploration_bonus = max(0.01, self.exploration_bonus * 0.999)
-                    if action != self.last_action:
-                        reward += self.exploration_bonus
-                    self.last_action = action
-                
-                # Scale and clip intermediate reward
-                reward = 2.0 * reward  # Scale to (0-2) range
-                reward = np.clip(reward, -0.5, 3.0)  # Allow small negative rewards
-                
-            except Exception as e:
-                # If something goes wrong with intermediate reward, continue with zero reward
+                # For now, let's provide a small, consistent reward based on the *change*
+                # in comfort and emissions if that data were readily available per step.
+                # Since it's not easily available without re-calculating KPIs on partial data,
+                # let's keep intermediate rewards simple: a small positive value for not being done,
+                # or a small penalty for undesirable states if detectable.
+
+                # For this simplification, we will make intermediate rewards zero.
+                # The learning will be driven by the terminal reward.
+                # This is a common approach in episodic tasks.
                 reward = 0.0
+
+            except Exception as e:
+                # If something goes wrong with intermediate reward, default to 0
+                reward = 0.0
+                # print(f"Warning: Error calculating intermediate reward: {e}") # Optional: log this
                 
             observation = self._get_observation()  # Get next observation
+
+        # Update last_action after processing the current action
+        self.last_action = action
 
         return observation, reward, done, info
 
