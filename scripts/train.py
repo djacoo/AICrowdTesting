@@ -96,27 +96,97 @@ class TrainingLogger:
 
 # Clean up previous training artifacts
 def cleanup_previous_runs():
-    """Remove previous model files and logs to ensure a fresh start."""
-    # Remove model files
-    for model_file in glob.glob('ppo_*_model*') + glob.glob(os.path.join('results', 'models', 'ppo_*_model*')):
-        try:
-            if os.path.isfile(model_file):
-                os.remove(model_file)
-            elif os.path.isdir(model_file):
-                shutil.rmtree(model_file)
-        except Exception as e:
-            print(f"Warning: Could not remove {model_file}: {e}")
+    """
+    Remove all previous training artifacts including models, logs, evaluations, and plots.
+    Cleans both /results and /scripts/results directories.
+    This ensures a clean start for each training run.
+    """
+    # Define base directories to clean
+    base_dirs = [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'results')),  # /results
+        os.path.abspath(os.path.join(os.path.dirname(__file__), 'results'))  # /scripts/results
+    ]
     
-    # Remove tensorboard logs
-    for log_dir in [
-        os.path.join('results', 'ppo_tensorboard_logs_2kpi'),
-        os.path.join('results', 'ppo_tensorboard_logs_multi_kpi')
-    ]:
+    # Define subdirectories to clean within each base directory
+    sub_dirs = [
+        '',  # The base directory itself
+        'logs',
+        'models',
+        'evaluation',
+        'tensorboard_logs',
+        'plots',
+        'checkpoints',
+        'ppo_tensorboard_logs_2kpi',
+        'ppo_tensorboard_logs_multi_kpi'
+    ]
+    
+    # Build full paths to clean
+    dirs_to_clean = []
+    for base in base_dirs:
+        for sub in sub_dirs:
+            dirs_to_clean.append(os.path.join(base, sub) if sub else base)
+    
+    # Add specific patterns to clean
+    patterns_to_clean = [
+        'ppo_*_model*',  # Model files
+        '*.log',        # Log files
+        '*.csv',        # CSV result files
+        '*.png',        # Plot images
+        '*.jpg',
+        '*.jpeg',
+        '*.gif',
+        '*.pdf',
+        'events.out.tfevents.*',  # TensorBoard event files
+        '*.pt',         # PyTorch files
+        '*.pth',
+        '*.bin',
+        '*.h5',
+        '*.zip',
+        '*.pkl',
+        '*.json',
+        '*.yaml',
+        '*.yml'
+    ]
+    
+    print("\n" + "="*50)
+    print("CLEANING UP PREVIOUS RUNS")
+    print("="*50)
+    
+    # Remove matching files in the root directory
+    for pattern in patterns_to_clean:
+        for file_path in glob.glob(pattern):
+            try:
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                    print(f"Removed file: {file_path}")
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+                    print(f"Removed directory: {file_path}")
+            except Exception as e:
+                print(f"Warning: Could not remove {file_path}: {e}")
+    
+    # Clean up directories
+    for dir_path in dirs_to_clean:
         try:
-            if os.path.exists(log_dir):
-                shutil.rmtree(log_dir)
+            if os.path.exists(dir_path):
+                if os.path.isfile(dir_path):
+                    os.remove(dir_path)
+                    print(f"Removed file: {dir_path}")
+                else:
+                    shutil.rmtree(dir_path)
+                    print(f"Removed directory: {dir_path}")
         except Exception as e:
-            print(f"Warning: Could not remove {log_dir}: {e}")
+            print(f"Warning: Could not remove {dir_path}: {e}")
+    
+    # Recreate necessary directories
+    os.makedirs('results', exist_ok=True)
+    os.makedirs(os.path.join('results', 'logs'), exist_ok=True)
+    os.makedirs(os.path.join('results', 'models'), exist_ok=True)
+    os.makedirs(os.path.join('results', 'evaluation'), exist_ok=True)
+    os.makedirs(os.path.join('results', 'plots'), exist_ok=True)
+    
+    print("\nCleanup complete. Ready to start a fresh training run.")
+    print("="*50 + "\n")
 
 # Run cleanup at the start
 cleanup_previous_runs()
@@ -985,8 +1055,8 @@ if __name__ == "__main__":
     # Training parameters
     NUM_BUILDINGS_MAIN = 1  # Number of buildings to train on
     TIMESTEPS_PER_EPISODE_MAIN = 24 * 7  # One week of hourly timesteps
-    TOTAL_TIMESTEPS_2KPI = 500000  # Total number of timesteps for 2-KPI training
-    TOTAL_TIMESTEPS_MULTI = 500000  # Total number of timesteps for Multi-KPI training
+    TOTAL_TIMESTEPS_2KPI = 400000  # Total number of timesteps for 2-KPI training
+    TOTAL_TIMESTEPS_MULTI = 400000  # Total number of timesteps for Multi-KPI training
     ENABLE_MULTI_KPI_TRAINING = True  # Enable multi-KPI training
     
     # Generate a random seed for reproducibility
