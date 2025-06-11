@@ -37,16 +37,6 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 from stable_baselines3.common.utils import get_schedule_fn
 
-class LinearSchedule:
-    """Linear schedule for learning rate decay."""
-    def __init__(self, initial_p, final_p, total_timesteps):
-        self.initial_p = initial_p
-        self.final_p = final_p
-        self.total_timesteps = total_timesteps
-
-    def __call__(self, progress_remaining: float):
-        return self.final_p + (self.initial_p - self.final_p) * progress_remaining
-
 # ===== Utility Functions =====
 
 def set_seed(seed: int = 42) -> None:
@@ -186,54 +176,82 @@ def plot_training_results(window_size=25):
         from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
         from pathlib import Path
 
-        def load_rewards(log_base):
+        def load_rewards(log_base_path: str) -> Optional[pd.DataFrame]:
             """
             Load reward history from TensorBoard event files.
+            Handles SB3's typical subdirectory structure for runs.
             
             Args:
-                log_base (str): Base path for the log directory.
+                log_base_path (str): Base path for the log directory (e.g., "ppo_tensorboard_logs_2kpi").
             
             Returns:
-                pd.DataFrame: Reward history with timesteps as index.
+                Optional[pd.DataFrame]: Reward history with timesteps as index, or None if loading fails.
             """
             try:
-                # Find all event files in the directory
-                event_files = list(Path(log_base).rglob('events.out.tfevents.*'))
-                if not event_files:
-                    print(f"No event files found in {log_base}")
+                base_path = Path(log_base_path)
+                if not base_path.exists():
+                    print(f"Log base path {log_base_path} does not exist.")
                     return None
+
+                run_dirs = [d for d in base_path.iterdir() if d.is_dir()]
+                if not run_dirs:
+                    # Check if event files are directly in log_base_path
+                    event_files_in_base = list(base_path.glob('events.out.tfevents.*'))
+                    if event_files_in_base:
+                        run_dirs = [base_path] # Treat base itself as the run_dir
+                    else:
+                        print(f"No run directories or event files found in {log_base_path}.")
+                        return None
+
+                latest_run_dir = None
+                latest_event_time = -1
+
+                for rundir_candidate in run_dirs:
+                    event_files = list(rundir_candidate.glob('events.out.tfevents.*'))
+                    if not event_files:
+                        continue
                     
-                # Sort by modification time to get the most recent
-                event_file = max(event_files, key=lambda x: x.stat().st_mtime)
-                print(f"Loading events from: {event_file}")
+                    current_latest_event_file = max(event_files, key=lambda x: x.stat().st_mtime)
+                    current_event_time = current_latest_event_file.stat().st_mtime
+
+                    if current_event_time > latest_event_time:
+                        latest_event_time = current_event_time
+                        latest_run_dir = rundir_candidate
                 
-                # Load the event file
-                acc = EventAccumulator(str(event_file.parent))
+                if not latest_run_dir:
+                    print(f"No event files found in any subdirectories of {log_base_path}.")
+                    return None
+
+                print(f"Loading events from: {latest_run_dir}")
+                acc = EventAccumulator(str(latest_run_dir))
                 acc.Reload()
+
+                required_tag = 'rollout/ep_rew_mean'
+                if required_tag not in acc.Tags()['scalars']:
+                    print(f"'{required_tag}' not found in {latest_run_dir}.")
+                    print(f"Available scalar tags: {list(acc.Tags()['scalars'])}")
+                    alternative_tags = ['eval/mean_reward', 'ep_reward_mean'] # Common alternatives
+                    for alt_tag in alternative_tags:
+                        if alt_tag in acc.Tags()['scalars']:
+                            print(f"Found alternative tag: {alt_tag}")
+                            required_tag = alt_tag
+                            break
+                    else: # If no alternative found
+                        return None
                 
-                # Check if the required tag exists
-                if 'rollout/ep_rew_mean' not in acc.Tags()['scalars']:
-                    print(f"'rollout/ep_rew_mean' not found in {event_file}")
-                    print(f"Available tags: {acc.Tags()}")
-                    return None
-                
-                # Get the reward data
-                events = acc.Scalars('rollout/ep_rew_mean')
+                events = acc.Scalars(required_tag)
                 if not events:
-                    print("No reward data found in event file")
+                    print(f"No data found for tag '{required_tag}' in {latest_run_dir}.")
                     return None
-                    
-                # Create a DataFrame with the reward data
+
                 steps = [e.step for e in events]
                 rewards = [e.value for e in events]
-                df = pd.DataFrame({'step': steps, 'reward': rewards})
-                df = df.set_index('step')
-                
-                print(f"Loaded {len(df)} reward entries")
+                df = pd.DataFrame({'step': steps, 'reward': rewards}).set_index('step')
+                print(f"Loaded {len(df)} reward entries from {latest_run_dir} for tag '{required_tag}'.")
                 return df
-                
+
             except Exception as e:
-                print(f"Error loading rewards from {log_base}: {str(e)}")
+                print(f"Error loading rewards from {log_base_path}: {str(e)}")
                 import traceback
                 traceback.print_exc()
                 return None
@@ -518,35 +536,25 @@ def main_multi_kpi_training(num_buildings: int, timesteps_per_episode: int) -> P
     model = PPO(
         "MlpPolicy",
         env_multi,
-        n_steps=4096,         # More frequent updates with smaller batches
-        batch_size=512,        # Smaller batch size for more frequent updates
-        n_epochs=15,          # More epochs for better sample efficiency
-        gamma=0.999,          # Higher discount factor for longer-term rewards
-        gae_lambda=0.92,      # Lower lambda for lower variance in advantage estimates
-        clip_range_vf=0.15,   # Tighter clipping for value function
-        ent_coef=0.05,        # Higher entropy for better exploration
-        vf_coef=0.95,         # Higher weight on value function loss
-        max_grad_norm=0.5,    # Tighter gradient clipping for stability
-        use_sde=False,        # Disable SDE for discrete action spaces
-        target_kl=0.01,       # Tighter KL divergence for more stable updates
+        n_steps=2048,         # Reduced n_steps
+        batch_size=512,       # Kept batch_size
+        n_epochs=10,          # Reduced n_epochs
+        gamma=0.99,           # Standardized gamma
+        gae_lambda=0.95,      # Standardized gae_lambda
+        clip_range_vf=0.2,    # Matched to clip_range
+        ent_coef=0.01,        # Reduced ent_coef
+        vf_coef=0.5,          # Standardized vf_coef
+        max_grad_norm=0.5,    # Kept max_grad_norm
+        use_sde=False,
+        target_kl=0.01,       # Kept target_kl
         tensorboard_log=TENSORBOARD_LOG_PATH_MULTI_BASE,
         policy_kwargs=policy_kwargs,
-        verbose=2,            # More detailed logging
+        verbose=2,
         device='auto',
         normalize_advantage=True,
-        seed=SEED,            # Use the global SEED for reproducibility
-        # More aggressive learning rate schedule
-        learning_rate=LinearSchedule(
-            initial_p=5e-4,    # Higher initial learning rate
-            final_p=1e-6,      # Lower final learning rate
-            total_timesteps=TOTAL_TIMESTEPS_MULTI
-        ),
-        # More aggressive clip range schedule
-        clip_range=LinearSchedule(
-            initial_p=0.25,    # Higher initial clip range
-            final_p=0.05,      # Lower final clip range
-            total_timesteps=TOTAL_TIMESTEPS_MULTI
-        )
+        seed=SEED,
+        learning_rate=2.5e-4, # Constant learning rate
+        clip_range=0.2        # Constant clip range
     )
     
     # --- Callbacks ---
@@ -786,52 +794,37 @@ def main_2kpi_training(num_buildings: int, timesteps_per_episode: int) -> PPO:
         },
         'activation_fn': th.nn.ReLU,
         'ortho_init': True,
-        'log_std_init': -1.0,  # Start with more exploration
-        'share_features_extractor': False,  # Separate feature extractors for policy and value
+        'log_std_init': 0.0,  # Changed log_std_init
+        'share_features_extractor': False,
         'optimizer_kwargs': {
-            'weight_decay': 1e-5,  # Slightly higher weight decay
+            'weight_decay': 1e-5,
             'eps': 1e-5
         }
     }
-    
-    # Stable learning rate schedule with warmup and decay
-    def lr_schedule(progress_remaining):
-        """Warmup from 1e-6 to 1e-4, then decay to 1e-5"""
-        warmup_steps = 0.2  # First 20% of training
-        if progress_remaining > 1.0 - warmup_steps:
-            # Warmup phase
-            return 1e-6 + (1e-4 - 1e-6) * ((1.0 - progress_remaining) / warmup_steps)
-        # Decay phase - slower decay
-        return max(1e-5, 1e-4 * (progress_remaining / (1.0 - warmup_steps))**0.5)
     
     # Enhanced PPO agent with optimized hyperparameters for 2-KPI training
     model_2kpi = PPO(
         'MlpPolicy',
         env_2kpi,
-        n_steps=4096,             # Longer rollouts for better advantage estimation
-        batch_size=256,           # Larger batch size for more stable updates
-        n_epochs=10,              # More epochs for better sample efficiency
-        gamma=0.997,              # Higher discount factor for longer-term rewards
-        gae_lambda=0.95,          # Standard GAE lambda for balanced bias-variance
-        clip_range=0.2,           # Standard PPO clipping range
-        clip_range_vf=0.2,        # Add clipping for value function
-        ent_coef=0.05,            # Higher entropy for better exploration
-        vf_coef=0.85,             # Higher value function coefficient
-        max_grad_norm=0.75,       # Slightly higher gradient clipping
+        n_steps=2048,             # Reduced n_steps
+        batch_size=256,           # Kept batch_size
+        n_epochs=10,              # Kept n_epochs
+        gamma=0.99,               # Standardized gamma
+        gae_lambda=0.95,          # Kept gae_lambda
+        clip_range=0.2,           # Kept clip_range
+        clip_range_vf=0.2,        # Kept clip_range_vf
+        ent_coef=0.01,            # Reduced ent_coef
+        vf_coef=0.5,              # Standardized vf_coef
+        max_grad_norm=0.5,        # Standardized max_grad_norm
         policy_kwargs=policy_kwargs,
         tensorboard_log=TENSORBOARD_LOG_PATH_2KPI_BASE,
         verbose=2,
         normalize_advantage=True,
-        target_kl=0.02,           # Tighter KL divergence for more stable updates
+        target_kl=0.02,           # Kept target_kl
         seed=SEED,
         stats_window_size=20,
         use_sde=False,
-        # Learning rate with linear schedule
-        learning_rate=LinearSchedule(
-            initial_p=3e-4,
-            final_p=1e-5,
-            total_timesteps=TOTAL_TIMESTEPS_2KPI
-        )
+        learning_rate=2.5e-4      # Constant learning rate
     )
 
     print(f"Starting 2-KPI training for {TOTAL_TIMESTEPS_2KPI} timesteps...")
