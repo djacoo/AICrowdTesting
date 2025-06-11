@@ -122,7 +122,7 @@ SEED = 42
 set_seed(SEED)
 
 TOTAL_TIMESTEPS_2KPI = 200000
-TOTAL_TIMESTEPS_MULTI = 250000
+TOTAL_TIMESTEPS_MULTI = 500000
 EVAL_FREQ = 5000  # Evaluate every 5k steps
 N_EVAL_EPISODES = 5  # Number of episodes for evaluation
 

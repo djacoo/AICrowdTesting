@@ -20,27 +20,87 @@ def generate_dummy_environment_data(num_timesteps, num_buildings, action=None):
     'action': A conceptual parameter. In this version, if provided, it applies a simple
     modification to the baseline electricity consumption array ('e_episode_array') for the episode.
     """
-    # Electricity consumption for each building, each timestep
-    e_episode_array = np.random.rand(num_timesteps, num_buildings) * 50
+    # --- Temperature Dynamics ---
+    # Sinusoidal daily outdoor temperature pattern
+    outdoor_temp_amplitude = 5  # Variation around the mean
+    outdoor_temp_mean = 10  # Mean outdoor temperature
+    outdoor_temp_episode_array = outdoor_temp_mean + outdoor_temp_amplitude * \
+                                 np.sin(2 * np.pi * np.arange(num_timesteps) / 24)
 
-    # Apply a conceptual action effect: if action is, e.g., 0 (low), 1 (medium), 2 (high)
-    # This is a very simplistic way to make actions have some effect.
-    if action is not None:
-        if action == 0: # "low consumption" target
-            e_episode_array *= 0.8
-        elif action == 2: # "high consumption" target (less efficient)
-            e_episode_array *= 1.2
-        # action == 1 (medium) would be the default random values
+    # Initialize temp_episode_array with a starting temperature for each building
+    # The rest will be calculated in the `step` method.
+    start_temp_per_building = np.random.uniform(20, 24, size=num_buildings) # e.g., random start between 20-24C
+    temp_episode_array = np.zeros((num_timesteps, num_buildings))
+    temp_episode_array[0, :] = start_temp_per_building
 
-    emission_rate_episode = np.random.rand(num_timesteps) * 0.5 + 0.1
-    temp_episode_array = np.random.rand(num_timesteps, num_buildings) * 10 + 15
-    setpoint_episode_array = np.full_like(temp_episode_array, 22.5)
-    occupancy_episode_array = np.random.randint(0, 2, size=temp_episode_array.shape)
+    # --- Electricity Consumption (e_episode_array) ---
+    # Baseline demand profile (e.g., related to occupancy or a typical load shape)
+    # For simplicity, let's make a typical office-like pattern for all buildings
+    # Higher during the day (8 AM - 6 PM), lower otherwise.
+    baseline_e_per_building = np.zeros((num_timesteps, num_buildings))
+    day_hours = (np.arange(num_timesteps) % 24 >= 8) & (np.arange(num_timesteps) % 24 < 18)
+    # Base load for each building (can be varied per building)
+    base_load_factor = np.random.uniform(20, 40, size=num_buildings) # Random base load between 20-40 units
+    peak_load_factor = base_load_factor * np.random.uniform(1.5, 2.5, size=num_buildings) # Peak is 1.5x to 2.5x base
+
+    for t in range(num_timesteps):
+        if 8 <= (t % 24) < 18: # Daytime: 8 AM to 6 PM
+            baseline_e_per_building[t, :] = peak_load_factor
+        else: # Nighttime or early morning
+            baseline_e_per_building[t, :] = base_load_factor
+    # Add some noise
+    baseline_e_per_building += np.random.normal(0, 5, size=baseline_e_per_building.shape)
+    baseline_e_per_building = np.clip(baseline_e_per_building, 5, 100) # Clip to reasonable values
+
+    e_episode_array = baseline_e_per_building.copy() # This will be modified by agent action in `step`
+
+    # --- Other Profiles ---
+    # Setpoint: Different for occupied/unoccupied times or day/night
+    setpoint_episode_array = np.full_like(temp_episode_array, 20.0) # Default night/unoccupied setpoint
+    day_setpoint = 23.0 # Target during the day
+    for t in range(num_timesteps):
+        if 8 <= (t % 24) < 18: # Daytime: 8 AM to 6 PM
+            setpoint_episode_array[t, :] = day_setpoint
+
+    # Occupancy: Typical office hours
+    occupancy_episode_array = np.zeros_like(temp_episode_array)
+    for t in range(num_timesteps):
+        if 8 <= (t % 24) < 18: # Occupied from 8 AM to 6 PM
+            occupancy_episode_array[t, :] = 1.0 # Assume 1 means occupied
+
+    # Emission Rate: Simple daily pattern (e.g., higher during peak grid load)
+    emission_rate_episode = np.zeros(num_timesteps)
+    base_emission = 0.2
+    peak_increase = 0.3 # Max increase
+    for t in range(num_timesteps):
+        # Higher emissions during typical peak load hours (e.g., afternoon)
+        if 12 <= (t % 24) < 20:
+            emission_rate_episode[t] = base_emission + peak_increase * (( (t % 24) - 12) / 8.0) # Ramp up
+        elif (t % 24) >= 20 or (t % 24) < 6: # Nighttime lower
+            emission_rate_episode[t] = base_emission * 0.8
+        else: # Morning ramp up
+            emission_rate_episode[t] = base_emission + peak_increase * 0.3 * (( (t % 24) - 6) / 6.0)
+    emission_rate_episode = np.clip(emission_rate_episode, 0.1, 0.6) # Ensure bounds
+
+    # Demand and Served: Related to e_episode_array, served affected by outages
+    # For now, demand is what would be consumed if no issues. Agent modifies 'e'.
+    # Let's assume 'e' is the actual consumption the agent tries to achieve.
+    # 'demand' could be a theoretical value if HVAC was running ideally for comfort,
+    # but for now, let's tie it more directly to 'e' as the baseline.
+    demand_episode_array = e_episode_array.copy() # Agent's target consumption before outages
+
+    # Outage Timesteps: Can remain random
+    outage_timesteps_episode = np.random.choice([True, False], size=num_timesteps, p=[0.05, 0.95]) # Less frequent outages
+
+    served_episode_array = demand_episode_array.copy()
+    for t in range(num_timesteps):
+        if outage_timesteps_episode[t]:
+            served_episode_array[t, :] = 0 # No electricity served during outage
+
+    # District consumption will be calculated based on the agent-modified 'e' in `step` or `reset`
+    # Initialize it here based on the baseline 'e'
     district_consumption_episode = np.sum(e_episode_array, axis=1)
-    outage_timesteps_episode = np.random.choice([True, False], size=num_timesteps, p=[0.1, 0.9])
-    demand_episode_array = e_episode_array * np.random.uniform(1.0, 1.2, size=e_episode_array.shape)
-    served_episode_array = demand_episode_array * np.random.uniform(0.7, 1.0, size=demand_episode_array.shape)
-    served_episode_array = np.minimum(demand_episode_array, served_episode_array)
+
 
     # This function in the plan was intended to generate data for the whole episode.
     # For a gym step, we need data for ONE timestep.
@@ -48,17 +108,18 @@ def generate_dummy_environment_data(num_timesteps, num_buildings, action=None):
     # and step() will iterate through it.
 
     return {
-        'e': e_episode_array,
+        'e': e_episode_array, # This is the baseline, to be copied to self.original_e_episode_array
         'emission_rate': emission_rate_episode,
-        'temp': temp_episode_array,
+        'temp': temp_episode_array, # Initial temp at t=0, rest to be filled
         'setpoint': setpoint_episode_array,
-        'band': 1.0,
+        'band': 1.0, # Comfort band (e.g., +/- 1 degree)
         'occupancy': occupancy_episode_array,
-        'district_consumption': district_consumption_episode,
+        'district_consumption': district_consumption_episode, # Based on baseline 'e'
         'hours_per_day': 24,
         'outage_timesteps': outage_timesteps_episode,
-        'demand': demand_episode_array,
-        'served': served_episode_array
+        'demand': demand_episode_array, # Based on baseline 'e'
+        'served': served_episode_array, # Based on baseline 'e' and outages
+        'outdoor_temp': outdoor_temp_episode_array # New outdoor temperature profile
     }
 
 class CustomCityEnv(gym.Env):
@@ -82,6 +143,13 @@ class CustomCityEnv(gym.Env):
         self.episode_length = timesteps_per_episode  # Initialize episode_length
 
         self.reward_calculator = ControlTrackReward(baseline=BASELINE_KPIS, phase=phase_weights)
+        self.phase_weights = phase_weights # Store for direct access if needed
+
+        # Temperature model parameters
+        self.k_loss = 0.1  # Heat loss coefficient
+        self.k_action = 0.5  # Coefficient for how much energy change affects temperature
+        self.baseline_energy_for_comfort = 20.0  # Assumed energy needed to maintain comfort (e.g., in kWh)
+                                                # This could be building-specific or dynamic later
 
         # Enhanced action space with 5 discrete actions for more granular control
         # 0: Very low consumption (aggressive energy saving)
@@ -143,8 +211,10 @@ class CustomCityEnv(gym.Env):
             norm_current_e = current_e / ABSOLUTE_MAX_E_PER_BUILDING
             obs.append(norm_current_e)
             
-            # Temp is [15, 25]. (temp - 15) / 10 gives [0, 1].
-            norm_current_temp = (current_temp - 15.0) / 10.0
+            # Temp is clipped to [10, 35] in step(). Normalizing to [0, 1].
+            # (temp - min_temp) / (max_temp - min_temp)
+            norm_current_temp = (current_temp - 10.0) / (35.0 - 10.0)
+            norm_current_temp = np.clip(norm_current_temp, 0.0, 1.0) # Ensure it stays in [0,1] due to potential float issues
             obs.append(norm_current_temp)
 
             # Add short-term trends (difference from previous normalized timestep)
@@ -155,7 +225,8 @@ class CustomCityEnv(gym.Env):
                 norm_prev_e = prev_e / ABSOLUTE_MAX_E_PER_BUILDING
                 obs.append(norm_current_e - norm_prev_e)  # Consumption trend will be roughly [-1, 1]
 
-                norm_prev_temp = (prev_temp - 15.0) / 10.0
+                norm_prev_temp = (prev_temp - 10.0) / (35.0 - 10.0)
+                norm_prev_temp = np.clip(norm_prev_temp, 0.0, 1.0)
                 obs.append(norm_current_temp - norm_prev_temp)  # Temperature trend will be roughly [-1, 1]
             else:
                 obs.extend([0.0, 0.0])  # No trend data for first step
@@ -204,12 +275,26 @@ class CustomCityEnv(gym.Env):
         self.episode_data = generate_dummy_environment_data(
             self.timesteps_per_episode, 
             self.num_buildings, 
-            action=None
+            self.timesteps_per_episode,
+            self.num_buildings
+            # Removed action=None, as it's no longer used by the new generator
         )
-        # Store a copy of the original electricity consumption data
+        # Store a copy of the original (baseline) electricity consumption data
+        # The 'e' from generate_dummy_environment_data is now the baseline.
         self.original_e_episode_array = self.episode_data['e'].copy()
-        
-        # Get initial observation
+
+        # Ensure 'temp' for the first timestep is correctly set from generate_dummy_environment_data
+        # self.episode_data['temp'][0, :] is already initialized by generate_dummy_environment_data.
+        # No further action needed here for temp initialization if generate_dummy_environment_data handles t=0.
+
+        # Initialize the actual 'e' for t=0 to be the baseline 'e' for t=0.
+        # Actions will modify 'e' from t=0 onwards in the first call to step().
+        # So, self.episode_data['e'] will store the *actual, agent-modified* consumption.
+        # The self.original_e_episode_array stores the baseline.
+        # For t=0, before any action is taken, actual 'e' is the baseline 'e'.
+        # This is already handled as episode_data['e'] is initialized from baseline.
+
+        # Get initial observation (based on t=0 data)
         obs = self._get_observation()
         
         # Verify observation shape matches the space
@@ -236,188 +321,167 @@ class CustomCityEnv(gym.Env):
         # Store the action in history before processing
         self.action_history.append(action)
 
-        # Apply the action to influence the environment state with stronger effects
-        # Action 0: Low consumption target (aggressive energy saving)
-        # Action 1: Medium consumption target (balanced approach)
-        # Enhanced action effects with 5 discrete levels
-        action_effect = {
-            0: 0.4,   # Very low (60% reduction)
+        # --- 1. Electricity Consumption Update (based on action) ---
+        action_effect_multiplier = {
+            0: 0.4,   # Very low (60% reduction from baseline)
             1: 0.7,   # Low (30% reduction)
-            2: 1.0,   # Medium (no change)
+            2: 1.0,   # Medium (baseline consumption)
             3: 1.4,   # High (40% increase)
             4: 1.8    # Very high (80% increase)
         }[action]
         
-        # Define absolute min/max for consumption per building
         ABSOLUTE_MIN_E_PER_BUILDING = 1.0
-        ABSOLUTE_MAX_E_PER_BUILDING = 100.0
+        ABSOLUTE_MAX_E_PER_BUILDING = 100.0 # Arbitrary cap, can be profile-dependent
 
-        # Apply action effect to the current timestep's consumption based on original data
-        if self.original_e_episode_array is not None and \
-           'e' in self.episode_data and \
-           self.current_timestep < self.timesteps_per_episode:
+        # Get baseline consumption for the current timestep
+        baseline_e_t = self.original_e_episode_array[self.current_timestep, :].copy()
+
+        # Apply action effect to get target consumption
+        target_e_t = baseline_e_t * action_effect_multiplier
+
+        # Clip to absolute limits
+        actual_e_t = np.clip(target_e_t, ABSOLUTE_MIN_E_PER_BUILDING, ABSOLUTE_MAX_E_PER_BUILDING)
+
+        # Store the agent-modified electricity consumption for the current timestep
+        self.episode_data['e'][self.current_timestep, :] = actual_e_t
+
+        # Update district consumption based on the agent-modified 'e' values
+        self.episode_data['district_consumption'][self.current_timestep] = np.sum(actual_e_t)
+
+        # If there's an outage, served electricity is zero for affected buildings
+        if self.episode_data['outage_timesteps'][self.current_timestep]:
+            # Assuming outage affects all buildings for simplicity, can be building-specific
+            self.episode_data['served'][self.current_timestep, :] = 0.0
+            # Also, actual electricity consumed ('e') should be 0 if served is 0.
+            self.episode_data['e'][self.current_timestep, :] = 0.0
+            # Re-update district consumption if 'e' changed due to outage
+            self.episode_data['district_consumption'][self.current_timestep] = np.sum(
+                self.episode_data['e'][self.current_timestep, :]
+            )
+        else:
+            # If no outage, served is equal to the (modified) demand 'e'
+             self.episode_data['served'][self.current_timestep, :] = self.episode_data['e'][self.current_timestep, :].copy()
+
+
+        # --- 2. Temperature Update (dynamic model) ---
+        # This must happen *after* 'e' for the current timestep is determined.
+        if self.current_timestep < self.timesteps_per_episode:
+            T_outdoor_current = self.episode_data['outdoor_temp'][self.current_timestep]
             
-            # Get base consumption from the original data for the current timestep
-            base_consumption_t = self.original_e_episode_array[self.current_timestep].copy() # Ensure it's an array for per-building
+            for b in range(self.num_buildings):
+                T_old = self.episode_data['temp'][self.current_timestep -1, b] if self.current_timestep > 0 else self.episode_data['temp'][0,b]
 
-            # Apply action effect
-            modified_consumption_t = base_consumption_t * action_effect
-            
-            # Clip the modified consumption to absolute limits
-            # Ensure clipping is done per building if modified_consumption_t is an array
-            if isinstance(modified_consumption_t, np.ndarray):
-                self.episode_data['e'][self.current_timestep] = np.clip(
-                    modified_consumption_t,
-                    ABSOLUTE_MIN_E_PER_BUILDING,
-                    ABSOLUTE_MAX_E_PER_BUILDING
-                )
-            else: # Should be an array if num_buildings > 1, but as a fallback for num_buildings = 1
-                 self.episode_data['e'][self.current_timestep, 0] = np.clip(
-                    modified_consumption_t, # This assumes modified_consumption_t is scalar if not ndarray
-                    ABSOLUTE_MIN_E_PER_BUILDING,
-                    ABSOLUTE_MAX_E_PER_BUILDING
-                )
+                # Action_effect_on_Energy is the actual electricity consumed by HVAC for building b
+                # We'll use self.episode_data['e'][self.current_timestep, b] as a proxy for this.
+                # This implies 'e' is primarily HVAC, or HVAC is a dominant part of it.
+                Action_effect_on_Energy = self.episode_data['e'][self.current_timestep, b]
 
-            # Update district consumption based on the newly modified 'e' values
-            if 'district_consumption' in self.episode_data:
-                self.episode_data['district_consumption'][self.current_timestep] = np.sum(
-                    self.episode_data['e'][self.current_timestep]
-                )
+                # Baseline_Energy_for_comfort could be related to maintaining setpoint,
+                # or a fixed value representing average energy for comfort.
+                # For now, using the fixed value from __init__.
 
-        # Increment timestep and step counter
+                delta_T_loss = self.k_loss * (T_old - T_outdoor_current)
+                delta_T_action = self.k_action * (Action_effect_on_Energy - self.baseline_energy_for_comfort)
+
+                T_new = T_old - delta_T_loss + delta_T_action
+
+                # Clip temperature to realistic bounds (e.g., 10C to 35C)
+                T_new = np.clip(T_new, 10.0, 35.0)
+
+                self.episode_data['temp'][self.current_timestep, b] = T_new
+
+        # --- 3. Intermediate Reward (Discomfort Penalty) ---
+        discomfort_penalty_current_step = 0.0
+        # Use data from the current timestep for penalty calculation
+        # Temp for current_timestep was just updated. Setpoint and Occupancy are from profile.
+        for b in range(self.num_buildings):
+            current_temp_b = self.episode_data['temp'][self.current_timestep, b]
+            current_setpoint_b = self.episode_data['setpoint'][self.current_timestep, b]
+            current_occupancy_b = self.episode_data['occupancy'][self.current_timestep, b]
+            comfort_band = self.episode_data['band'] # Assuming 'band' is scalar or correctly shaped
+
+            if current_occupancy_b > 0 and abs(current_temp_b - current_setpoint_b) > comfort_band:
+                discomfort_penalty_current_step += \
+                    (abs(current_temp_b - current_setpoint_b) - comfort_band) * 0.1 # Small penalty factor
+
+        intermediate_reward = -discomfort_penalty_current_step
+
+        # --- Increment timestep and check for done ---
         self.current_timestep += 1
-        self.current_step += 1  # Increment current_step
+        self.current_step += 1
         done = self.current_timestep >= self.timesteps_per_episode
         info = {}
-        
-        # Calculate intermediate reward based on current timestep
-        reward = 0.0
-        
+
+        # --- 4. Episodic Reward (if done) ---
         if done:
             try:
-                # Calculate final KPIs for the episode
+                # Ensure all necessary data in self.episode_data is up-to-date before KPI calculation.
+                # 'e' (agent-modified), 'temp' (dynamically calculated), 'setpoint', 'occupancy',
+                # 'emission_rate', 'district_consumption', 'served', 'demand' etc. should be final.
+                # 'demand' in this context is the baseline demand before agent action,
+                # which is self.original_e_episode_array.
+                # However, the reward calculator might expect 'demand' to be something else.
+                # For CityLearn, 'demand' is often the energy consumed by the building.
+                # Let's ensure our `self.episode_data` matches expectations or adjust.
+                # The AICrowdControl kpi functions expect `self.episode_data['e']` as consumption.
+                # Let's make sure `self.episode_data['demand']` is consistent with `['e']` if it's used by KPIs,
+                # or pass `self.original_e_episode_array` if that's the intended 'demand' for some KPI.
+                # For now, let's assume KPIs use `self.episode_data['e']` as the primary consumption metric.
+                # The `generate_dummy_environment_data` sets `demand` based on baseline `e`.
+                # If KPIs need demand that *would have been* without agent, then `original_e_episode_array` is better.
+                # Let's assume for now `self.episode_data['demand']` is the relevant one.
+                # The current setup:
+                # self.episode_data['e'] is agent-modified consumption.
+                # self.episode_data['demand'] was initialized from baseline_e_per_building.
+                # self.episode_data['served'] is self.episode_data['e'] unless outage.
+
                 raw_kpis = self.reward_calculator.get_all_kpi_values(self.episode_data)
                 
-                # Get individual KPI components
-                emissions = raw_kpis.get('carbon_emissions', 1000)
-                unmet_hours = raw_kpis.get('unmet_hours', 1.0)
-                # Other KPIs can be kept for info if needed
-                ramping = raw_kpis.get('ramping', 0)
-                load_factor = raw_kpis.get('load_factor', 0)
-                peaks = raw_kpis.get('peaks', 0)
-                resilience = raw_kpis.get('resilience', 0)
-
-                # 1. Calculate base scores
-                # Comfort score: 1 is best (no unmet hours), 0 is worst (1 or more unmet hours ratio)
-                comfort_score = 1.0 - min(1.0, unmet_hours)
+                # Calculate episodic reward using the reward calculator's score method
+                episodic_reward_raw = self.reward_calculator.score(raw_kpis)
                 
-                # Emissions score: Scaled to be higher for lower emissions.
-                # Using a simple inverse relationship, normalized. Max emissions could be e.g. 2000 to make score 0.
-                # Let's aim for a score between 0 and 1.
-                # If baseline emissions are X, and we achieve Y, score is roughly X/Y.
-                # Let's use a simpler normalization: e.g. baseline_emissions / (baseline_emissions + current_emissions)
-                # Or, more directly, 1 / (1 + normalized_emissions).
-                # Assuming emissions around a few hundreds to a thousand.
-                # Let's try: 1 - (emissions / (BASELINE_KPIS.get('carbon_emissions', 1000) * 2))
-                # This makes emissions_score = 0.5 if current emissions = baseline, 1 if emissions = 0, 0 if emissions = 2*baseline
-                baseline_emissions_kpi = BASELINE_KPIS.get('carbon_emissions', 1000) # Default if not in BASELINE_KPIS
-                emissions_score = np.clip(1.0 - (emissions / (baseline_emissions_kpi * 2.0)), 0.0, 1.0)
-
-                # 2. Calculate base_reward (focused on comfort and emissions)
-                # Simple weighted average, scaled.
-                # Weights can be adjusted, e.g., 0.7 for comfort, 0.3 for emissions.
-                base_reward = 100.0 * (0.7 * comfort_score + 0.3 * emissions_score)
-
-                # 3. Define comfort_bonus and emissions_bonus (simpler calculation)
-                # Bonus if scores exceed a certain threshold, e.g., 0.8
-                comfort_bonus = 0.0
-                if comfort_score > 0.8:
-                    comfort_bonus = 20.0 * (comfort_score - 0.8) # Linear bonus
-
-                emissions_bonus = 0.0
-                if emissions_score > 0.8:
-                    emissions_bonus = 20.0 * (emissions_score - 0.8) # Linear bonus
+                # Scale the reward
+                scaled_episodic_reward = episodic_reward_raw * 100.0 # Scaling factor (e.g., 100 or 200)
                 
-                # 4. Action penalty (optional, can be kept simple)
-                action_penalty = 0.0
-                if hasattr(self, 'last_action') and action is not None and hasattr(self, 'action_history') and len(self.action_history) > 1:
-                    # Penalize frequent changes if last_action is defined
-                    action_change = abs(action - self.action_history[-2]) / (self.action_space.n -1) # Normalize by action space size
-                    action_penalty = 5.0 * action_change # Small penalty for action changes
+                # The final reward for this step (when done) is the scaled episodic reward
+                # plus the (negative) discomfort penalty for this very last step.
+                reward = scaled_episodic_reward + intermediate_reward # intermediate_reward is already negative
                 
-                # 5. Combine components
-                # Removed progress_bonus, terminal_bonus, progress_factor, temperature, reward_scale
-                reward = base_reward + comfort_bonus + emissions_bonus - action_penalty
-                
-                # 6. Clip to a revised range if necessary.
-                # Given the new calculation, max possible (approx): 100 (base) + 20*0.2 (comfort) + 20*0.2 (emissions) = 108
-                # Min possible (approx): 0 (base, bonuses) - 5 (penalty) = -5
-                # Let's set a range like -10 to 110.
-                reward = np.clip(reward, -10.0, 110.0)
-                
-                # Store detailed info for analysis
                 info = {
                     'episode_kpis': raw_kpis,
-                    'comfort_score': comfort_score,
-                    'emissions_score': emissions_score,
-                    'carbon_emissions': emissions,
-                    'unmet_hours': unmet_hours,
-                    'base_reward_calculated': base_reward,
-                    'comfort_bonus_calculated': comfort_bonus,
-                    'emissions_bonus_calculated': emissions_bonus,
-                    'action_penalty_calculated': action_penalty,
-                    'final_reward_before_clip': base_reward + comfort_bonus + emissions_bonus - action_penalty,
-                    # Keep other KPIs for logging if needed
-                    'ramping': ramping,
-                    'load_factor': load_factor,
-                    'peaks': peaks,
-                    'resilience': resilience
+                    'raw_episodic_reward': episodic_reward_raw,
+                    'scaled_episodic_reward': scaled_episodic_reward,
+                    'final_discomfort_penalty_contrib': intermediate_reward, # For this last step
+                    'final_reward': reward,
+                    # Include individual KPIs from raw_kpis for detailed logging if needed
                 }
-                
+                # Add all raw_kpis to info for easier access
+                if isinstance(raw_kpis, dict):
+                    for k,v in raw_kpis.items():
+                        info[f"kpi_{k}"] = v
+
             except Exception as e:
                 print(f"Error calculating KPIs/reward at end of episode: {e}")
-                reward = -10.0  # Penalty for failure, consistent with new clip range
+                reward = -100.0  # Significant penalty for failure
                 info = {'error': str(e)}
                 
             # For the terminal state, the observation is typically not used by SB3,
-            # but providing a zero vector is a common practice.
-            observation = np.zeros(self.observation_space.shape, dtype=np.float32)
-        else:
-            # Intermediate reward: simple, based on current comfort and emissions scores
-            reward = 0.0 # Default to 0 for intermediate steps
-            try:
-                # Use only the current timestep's data for a less complex intermediate signal
-                # This requires properties of episode_data to be sliceable up to current_timestep
-                
-                # For a very simple intermediate reward, we might not even calculate full KPIs
-                # but use proxies from the current observation or very recent data.
-                # However, to keep it somewhat aligned with final goals:
-                
-                # Let's get current 'unmet_hours' and 'carbon_emissions' if possible,
-                # or proxies. The observation itself contains normalized values that could be used.
-                # For simplicity, let's assume we can get a rough idea of current comfort/emissions.
-                
-                # Simplified: Use a proxy for comfort and emissions from current step data if available
-                # This is a placeholder; a robust implementation might need more careful KPI calculation
-                # or rely on values that are updated incrementally.
-                
-                # For now, let's provide a small, consistent reward based on the *change*
-                # in comfort and emissions if that data were readily available per step.
-                # Since it's not easily available without re-calculating KPIs on partial data,
-                # let's keep intermediate rewards simple: a small positive value for not being done,
-                # or a small penalty for undesirable states if detectable.
+            # but providing a zero vector or the last valid observation are common.
+            # Let's use the last valid observation.
+            # _get_observation uses self.current_timestep, which is now self.timesteps_per_episode.
+            # We need obs for t = self.timesteps_per_episode - 1.
+            # However, _get_observation might try to access self.current_timestep,
+            # so we might need to temporarily decrement it or pass the step index.
+            # For now, a zero vector is safer if _get_observation isn't robust to this.
+            # Let's ensure _get_observation can handle current_timestep == timesteps_per_episode for terminal state.
+            # The existing _get_observation has a check:
+            # if self.episode_data is None or self.current_timestep >= self.timesteps_per_episode:
+            # This means it would return zeros, which is fine.
+            observation = self._get_observation()
 
-                # For this simplification, we will make intermediate rewards zero.
-                # The learning will be driven by the terminal reward.
-                # This is a common approach in episodic tasks.
-                reward = 0.0
-
-            except Exception as e:
-                # If something goes wrong with intermediate reward, default to 0
-                reward = 0.0
-                # print(f"Warning: Error calculating intermediate reward: {e}") # Optional: log this
-                
-            observation = self._get_observation()  # Get next observation
+        else: # Not done
+            reward = intermediate_reward # Per-step reward is just the discomfort penalty
+            observation = self._get_observation()
 
         # Update last_action after processing the current action
         self.last_action = action
