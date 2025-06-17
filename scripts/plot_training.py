@@ -103,12 +103,10 @@ def plot_training_comparison(log_dirs, labels, metric='rollout/ep_rew_mean'):
         df_ma = df[metric].rolling(window=window, min_periods=1).mean()
         df_std = df[metric].rolling(window=window, min_periods=1).std()
         
-        # Plot
-        plt.plot(df['step'], df[metric], alpha=0.15, color=colors(i), label=f'{label} (Raw)')
+        # Plot moving average with standard deviation
         plt.plot(df['step'], df_ma, linewidth=2, color=colors(i),
-                label=f'{label} (MA {window} steps)')
-        plt.fill_between(df['step'], df_ma - df_std, df_ma + df_std, alpha=0.2, color=colors(i),
-                         label=f'{label} (Std Dev)')
+                label=f'{label}')
+        plt.fill_between(df['step'], df_ma - df_std, df_ma + df_std, alpha=0.2, color=colors(i))
     
     # Formatting
     plt.title(f'Training Comparison: {metric} with ±1 Std Dev', fontsize=16, pad=20)
@@ -194,9 +192,8 @@ def plot_kpi_metrics(log_dir, title_suffix=""):
         window = max(1, len(df) // 20)
         df[f'{metric}_ma'] = df[metric].rolling(window=window, min_periods=1).mean()
         
-        # Plot
-        ax.plot(df['step'], df[metric], alpha=0.3, label='Raw')
-        ax.plot(df['step'], df[f'{metric}_ma'], linewidth=2, label=f'MA {window} steps')
+        # Plot moving average
+        ax.plot(df['step'], df[f'{metric}_ma'], linewidth=2, label=f'Moving Average ({window} steps)')
         
         ax.set_title(metric)
         ax.grid(True, alpha=0.3)
